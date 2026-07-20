@@ -31,8 +31,8 @@
 | 抽象 | 作用 | 当前实现 | 可替换为 |
 |---|---|---|---|
 | `Renderer` | 节点 → 输出格式 | Mihomo / sing-box / Surge | QuantumultX … |
-| `Storage` | 持久化 | sqlite / 内存 | D1 / KV（serverless） |
-| `ScriptRunner` | 脚本沙箱 | node:vm | isolated-vm / QuickJS-wasm |
+| `Storage` | 持久化 | sqlite / 内存 / **D1** | KV … |
+| `ScriptRunner` | 脚本沙箱 | node:vm / **QuickJS-wasm** | isolated-vm … |
 | `AgentRunner` | agent 循环 | Vercel AI SDK | Mastra … |
 | `Memory` | agent 记忆 | sqlite | 向量库（语义召回） |
 | `Tool` registry | 工具集（唯一真相来源） | — | 同时供内嵌 agent 与 MCP server |
@@ -57,6 +57,11 @@ npm run dev:server     # 后端 :8787
 npm run dev:web        # 前端 :5173（开发代理到后端）
 npm test               # 运行全部测试
 ```
+
+### Cloudflare Workers（serverless）
+
+D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDFLARE.md`](docs/DEPLOY_CLOUDFLARE.md)。
+边缘部署不支持节点测活（无原始 TCP）；脚本仅支持同步。
 
 ## 环境变量
 

@@ -9,7 +9,7 @@ import {
   saveProfileWithVersion,
 } from '../service.js'
 import { parseSubscription } from '@subforge/core'
-import { checkNodes } from '../health.js'
+import type { NodeChecker } from '../health.js'
 
 /** 框架无关的工具定义。MCP server 与内嵌 agent 都是它的薄适配层。 */
 export interface Tool<I extends ZodTypeAny = ZodTypeAny> {
@@ -22,6 +22,8 @@ export interface Tool<I extends ZodTypeAny = ZodTypeAny> {
 export interface ToolContext {
   storage: Storage
   runner: ScriptRunner
+  /** 测活能力（Node 注入；边缘运行时可缺省 → test_nodes 不可用） */
+  checkNodes?: NodeChecker
 }
 
 /** 工具集合（唯一真相来源）。 */
@@ -172,7 +174,8 @@ export function buildTools(): Tool[] {
       name: 'test_nodes',
       description: '对某转换档的节点做 TCP 测活/延迟测试，返回每个节点的握手延迟（ms）与存活数。可据此建议按延迟分组或剔除失效节点。',
       schema: z.object({ profileId: z.string(), limit: z.number().int().positive().max(200).default(50) }),
-      async handler({ profileId, limit }, { storage }) {
+      async handler({ profileId, limit }, { storage, checkNodes }) {
+        if (!checkNodes) throw new Error('当前部署不支持测活（边缘运行时）')
         const p = await storage.getProfile(profileId)
         if (!p) throw new Error('转换档不存在')
         const raws = await collectRawSubscriptions(storage, p)

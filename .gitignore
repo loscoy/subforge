@@ -9,3 +9,5 @@ data/
 .DS_Store
 coverage/
 packages/web/dist/
+.wrangler/
+.dev.vars

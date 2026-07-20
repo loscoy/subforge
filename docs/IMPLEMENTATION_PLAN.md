@@ -13,8 +13,9 @@
   - ✅ Surge 渲染器（ss/vmess/trojan/hysteria2，不支持协议优雅跳过）
   - ✅ 订阅流量/到期（解析 `subscription-userinfo` 头，前端展示）
   - ✅ 节点测活/延迟（TCP 连接，API 端点 + `test_nodes` agent 工具 + 前端展示）
-  - ⏳ serverless 适配器：需把 `Storage` 全面异步化（KV/D1 异步、当前 sqlite 同步），改动面大且本地无法真机验证，留作独立一档。
-- **测试**：48 个用例全绿（解析 / 渲染 ×3 / 沙箱 / 工具 / 路由 / agent-mock / 测活 / 流量解析）；含多格式与测活端到端冒烟验证。
+  - ✅ **serverless (Cloudflare Workers)**：`Storage` 已全面异步化；新增 `D1Storage`、`QuickJsRunner`（QuickJS-wasm 边缘沙箱）、Workers 入口 `worker.ts`、`wrangler.jsonc`、D1 迁移；前端由 assets 绑定托管。测活在边缘不可用（无原始 TCP）。详见 `docs/DEPLOY_CLOUDFLARE.md`。
+- **测试**：62 个用例全绿（解析 / 渲染 ×3 / node:vm 沙箱 / QuickJS 沙箱 / 存储契约 ×2(含 D1) / 工具 / 路由 / agent-mock / 测活 / 流量解析）。
+- **验证边界**：D1 用「sqlite 伪造 D1」跑通存储契约；Worker 经 `wrangler deploy --dry-run` 打包验证；workerd 运行时验证待实际部署（本机 glibc 过旧无法跑 workerd）。
 
 ## 0. 设计基调（已确定的决策）
 

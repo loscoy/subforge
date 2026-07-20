@@ -28,6 +28,9 @@ export interface NodeHealth {
   latency: number | null
 }
 
+/** 测活函数签名（注入式，便于在无 node:net 的运行时替换或禁用）。 */
+export type NodeChecker = (nodes: ProxyNode[]) => Promise<NodeHealth[]>
+
 /** 并发测活一批节点（限并发，避免打爆本机）。 */
 export async function checkNodes(nodes: ProxyNode[], concurrency = 16, timeoutMs = 3000): Promise<NodeHealth[]> {
   const results: NodeHealth[] = new Array(nodes.length)

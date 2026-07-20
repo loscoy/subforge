@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type ConversionProfile, type ScriptRunner } from '@subforge/core'
-import { checkNodes } from '../health.js'
+import type { NodeChecker } from '../health.js'
 import type { AgentRunner } from '../agent/index.js'
 import type { ServerConfig } from '../config.js'
 import type { Profile, Storage, Subscription } from '../storage/index.js'
@@ -21,6 +21,8 @@ export interface AppDeps {
   config: ServerConfig
   /** 构建 agent（config.agent 存在时提供） */
   makeAgent?: () => AgentRunner
+  /** 测活能力（Node 注入；边缘缺省则该端点返回 501） */
+  checkNodes?: NodeChecker
 }
 
 const EMPTY_PROFILE: ConversionProfile = {
@@ -159,11 +161,12 @@ export function createApp(deps: AppDeps): Hono {
     }
   })
   api.post('/profiles/:id/healthcheck', async (c) => {
+    if (!deps.checkNodes) return c.json({ error: '当前部署不支持测活（边缘运行时）' }, 501)
     const p = await storage.getProfile(c.req.param('id'))
     if (!p) return c.json({ error: '不存在' }, 404)
     const raws = await collectRawSubscriptions(storage, p)
     const nodes = raws.flatMap((r) => parseSubscription(r))
-    const results = await checkNodes(nodes)
+    const results = await deps.checkNodes(nodes)
     const alive = results.filter((r) => r.latency !== null).length
     return c.json({ total: results.length, alive, results })
   })

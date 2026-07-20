@@ -1,4 +1,5 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
+import { checkNodes } from '../health.js'
 import { NodeVmRunner } from '../sandbox/nodeVm.js'
 import { SqliteStorage } from '../storage/index.js'
 import { createMcpServer } from './server.js'
@@ -15,7 +16,7 @@ async function main() {
   const cfg = getConfig()
   const storage = new SqliteStorage(cfg.dbPath)
   const runner = new NodeVmRunner()
-  const server = createMcpServer({ storage, runner })
+  const server = createMcpServer({ storage, runner, checkNodes })
   const transport = new StdioServerTransport()
   await server.connect(transport)
   // 保持进程存活由 stdio transport 负责

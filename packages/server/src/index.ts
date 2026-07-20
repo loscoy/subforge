@@ -4,6 +4,7 @@ import { existsSync, mkdirSync } from 'node:fs'
 import { dirname } from 'node:path'
 import { AiSdkAgentRunner } from './agent/index.js'
 import { getConfig } from './config.js'
+import { checkNodes } from './health.js'
 import { createApp } from './routes/app.js'
 import { NodeVmRunner } from './sandbox/nodeVm.js'
 import { SqliteStorage } from './storage/index.js'
@@ -22,8 +23,9 @@ function main() {
     storage,
     runner,
     config,
+    checkNodes,
     makeAgent: config.agent
-      ? () => new AiSdkAgentRunner({ storage, runner }, config.agent!)
+      ? () => new AiSdkAgentRunner({ storage, runner, checkNodes }, config.agent!)
       : undefined,
   })
 

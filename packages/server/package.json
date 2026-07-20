@@ -9,19 +9,26 @@
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
     "mcp": "tsx src/mcp/stdio.ts",
+    "cf:dev": "wrangler dev",
+    "cf:deploy": "wrangler deploy",
+    "cf:migrate:local": "wrangler d1 migrations apply subforge --local",
+    "cf:migrate:remote": "wrangler d1 migrations apply subforge --remote",
     "test": "vitest run"
   },
   "dependencies": {
-    "@subforge/core": "0.1.0",
-    "@hono/node-server": "^1.13.7",
-    "hono": "^4.6.14",
-    "better-sqlite3": "^11.7.0",
-    "zod": "^3.24.1",
-    "ai": "^4.0.30",
     "@ai-sdk/openai-compatible": "^0.1.0",
-    "@modelcontextprotocol/sdk": "^1.0.4"
+    "@hono/node-server": "^1.13.7",
+    "@modelcontextprotocol/sdk": "^1.0.4",
+    "@subforge/core": "0.1.0",
+    "ai": "^4.0.30",
+    "better-sqlite3": "^11.7.0",
+    "hono": "^4.6.14",
+    "quickjs-emscripten": "^0.31.0",
+    "zod": "^3.24.1"
   },
   "devDependencies": {
-    "@types/better-sqlite3": "^7.6.12"
+    "@cloudflare/workers-types": "^4.20260702.1",
+    "@types/better-sqlite3": "^7.6.12",
+    "wrangler": "^4.112.0"
   }
 }
