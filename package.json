@@ -1,0 +1,30 @@
+{
+  "name": "subforge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "自托管、可编程、Agent 友好的代理订阅转换/管理工具",
+  "license": "MIT",
+  "type": "module",
+  "workspaces": [
+    "packages/core",
+    "packages/server",
+    "packages/web"
+  ],
+  "scripts": {
+    "build": "npm run build -w @subforge/core && npm run build -w @subforge/server && npm run build -w @subforge/web",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --pretty",
+    "dev:server": "npm run dev -w @subforge/server",
+    "dev:web": "npm run dev -w @subforge/web"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.8",
+    "tsx": "^4.19.2",
+    "@types/node": "^22.10.2"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}
