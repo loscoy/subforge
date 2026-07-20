@@ -3,7 +3,7 @@ import { api } from '../api'
 import type { Profile, Subscription } from '../types'
 import { ScriptEditor } from './ScriptEditor'
 
-export function Profiles({ dts }: { dts: string }) {
+export function Profiles({ dts, renderers }: { dts: string; renderers: string[] }) {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [subs, setSubs] = useState<Subscription[]>([])
   const [sel, setSel] = useState<Profile | null>(null)
@@ -54,6 +54,7 @@ export function Profiles({ dts }: { dts: string }) {
             profile={sel}
             subs={subs}
             dts={dts}
+            renderers={renderers}
             onSaved={(p) => {
               setSel(p)
               load()
@@ -73,22 +74,26 @@ function ProfileDetail({
   profile,
   subs,
   dts,
+  renderers,
   onSaved,
   onDeleted,
 }: {
   profile: Profile
   subs: Subscription[]
   dts: string
+  renderers: string[]
   onSaved: (p: Profile) => void
   onDeleted: () => void
 }) {
   const [name, setName] = useState(profile.name)
+  const [target, setTarget] = useState(profile.target)
   const [subIds, setSubIds] = useState<string[]>(profile.subscriptionIds)
   const [script, setScript] = useState(profile.script || '')
   const [configText, setConfigText] = useState(JSON.stringify(profile.profile, null, 2))
   const [msg, setMsg] = useState('')
   const [err, setErr] = useState('')
   const [versions, setVersions] = useState<{ id: string; note?: string; createdAt: number }[]>([])
+  const [health, setHealth] = useState<{ alive: number; total: number; results: { name: string; latency: number | null }[] } | null>(null)
 
   const shareUrl = `${location.origin}/sub/${profile.token}`
 
@@ -105,6 +110,7 @@ function ProfileDetail({
     try {
       const p = await api.updateProfile(profile.id, {
         name,
+        target,
         subscriptionIds: subIds,
         script: script || undefined,
         profile: parsedProfile,
@@ -128,9 +134,19 @@ function ProfileDetail({
             <input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div>
-            <div className="muted">分享链接</div>
-            <input readOnly value={shareUrl} onFocus={(e) => e.currentTarget.select()} />
+            <div className="muted">输出格式</div>
+            <select value={target} onChange={(e) => setTarget(e.target.value)}>
+              {renderers.map((r) => (
+                <option key={r} value={r}>
+                  {r}
+                </option>
+              ))}
+            </select>
           </div>
+        </div>
+        <div style={{ marginTop: 8 }}>
+          <div className="muted">分享链接</div>
+          <input readOnly value={shareUrl} onFocus={(e) => e.currentTarget.select()} />
         </div>
         <div style={{ marginTop: 10 }}>
           <div className="muted">关联订阅</div>
@@ -156,12 +172,14 @@ function ProfileDetail({
           <button onClick={() => api.output(profile.id).then((o) => alert(o.ok ? o.config?.slice(0, 4000) : o.error))}>
             查看输出
           </button>
+          <button onClick={() => api.versions(profile.id).then(setVersions)}>版本历史</button>
           <button
-            onClick={() =>
-              api.versions(profile.id).then(setVersions)
-            }
+            onClick={() => {
+              setHealth(null)
+              api.healthcheck(profile.id).then(setHealth).catch((e) => setErr(String(e)))
+            }}
           >
-            版本历史
+            测活
           </button>
           <div className="spacer" />
           <button className="danger" onClick={() => api.deleteProfile(profile.id).then(onDeleted)}>
@@ -170,6 +188,23 @@ function ProfileDetail({
         </div>
         {msg && <div className="muted" style={{ marginTop: 6 }}>{msg}</div>}
         {err && <div className="error" style={{ marginTop: 6 }}>{err}</div>}
+        {health && (
+          <div style={{ marginTop: 10 }}>
+            <div className="muted">
+              存活 <b>{health.alive}</b> / {health.total}
+            </div>
+            <div style={{ maxHeight: 160, overflow: 'auto', marginTop: 4 }}>
+              {health.results
+                .slice()
+                .sort((a, b) => (a.latency ?? 99999) - (b.latency ?? 99999))
+                .map((r, i) => (
+                  <span className="node-chip" key={i} style={{ color: r.latency === null ? 'var(--danger)' : undefined }}>
+                    {r.name} · {r.latency === null ? '超时' : `${r.latency}ms`}
+                  </span>
+                ))}
+            </div>
+          </div>
+        )}
         {versions.length > 0 && (
           <div style={{ marginTop: 10 }}>
             {versions.map((v) => (

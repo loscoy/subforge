@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { fmtBytes, fmtExpire, usedBytes } from '../format'
 import type { Subscription } from '../types'
 
 export function Subscriptions() {
@@ -41,6 +42,16 @@ export function Subscriptions() {
                 <div className="muted">
                   {s.fetchedAt ? `更新于 ${new Date(s.fetchedAt).toLocaleString()}` : '未抓取'}
                 </div>
+                {s.userInfo && (s.userInfo.total !== undefined || s.userInfo.expire) && (
+                  <div className="muted">
+                    {s.userInfo.total !== undefined && (
+                      <span className="pill" style={{ marginRight: 6 }}>
+                        流量 {fmtBytes(usedBytes(s.userInfo))} / {fmtBytes(s.userInfo.total)}
+                      </span>
+                    )}
+                    {s.userInfo.expire && <span className="pill">到期 {fmtExpire(s.userInfo.expire)}</span>}
+                  </div>
+                )}
               </div>
               <div style={{ display: 'flex', gap: 6 }}>
                 {s.url && (

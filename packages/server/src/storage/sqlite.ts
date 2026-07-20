@@ -16,7 +16,7 @@ export class SqliteStorage implements Storage {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS subscriptions (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT, content TEXT,
-        fetchedAt INTEGER, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+        fetchedAt INTEGER, userInfo TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS profiles (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, subscriptionIds TEXT NOT NULL,
@@ -35,24 +35,33 @@ export class SqliteStorage implements Storage {
       CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(threadId, createdAt);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
     `)
+    // 旧库补列（幂等）
+    const cols = this.db.prepare('PRAGMA table_info(subscriptions)').all() as { name: string }[]
+    if (!cols.some((c) => c.name === 'userInfo')) {
+      this.db.exec('ALTER TABLE subscriptions ADD COLUMN userInfo TEXT')
+    }
   }
 
   // ---- 订阅 ----
+  private rowToSub(row: any): Subscription {
+    return { ...row, userInfo: row.userInfo ? JSON.parse(row.userInfo) : undefined }
+  }
   listSubscriptions(): Subscription[] {
-    return this.db.prepare('SELECT * FROM subscriptions ORDER BY createdAt').all() as Subscription[]
+    return (this.db.prepare('SELECT * FROM subscriptions ORDER BY createdAt').all() as any[]).map((r) => this.rowToSub(r))
   }
   getSubscription(id: string): Subscription | undefined {
-    return this.db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id) as Subscription | undefined
+    const r = this.db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id)
+    return r ? this.rowToSub(r) : undefined
   }
   upsertSubscription(s: Subscription): void {
     this.db
       .prepare(
-        `INSERT INTO subscriptions (id,name,url,content,fetchedAt,createdAt,updatedAt)
-         VALUES (@id,@name,@url,@content,@fetchedAt,@createdAt,@updatedAt)
+        `INSERT INTO subscriptions (id,name,url,content,fetchedAt,userInfo,createdAt,updatedAt)
+         VALUES (@id,@name,@url,@content,@fetchedAt,@userInfo,@createdAt,@updatedAt)
          ON CONFLICT(id) DO UPDATE SET
-           name=@name,url=@url,content=@content,fetchedAt=@fetchedAt,updatedAt=@updatedAt`,
+           name=@name,url=@url,content=@content,fetchedAt=@fetchedAt,userInfo=@userInfo,updatedAt=@updatedAt`,
       )
-      .run({ url: null, content: null, fetchedAt: null, ...s })
+      .run({ url: null, content: null, fetchedAt: null, ...s, userInfo: s.userInfo ? JSON.stringify(s.userInfo) : null })
   }
   deleteSubscription(id: string): void {
     this.db.prepare('DELETE FROM subscriptions WHERE id = ?').run(id)

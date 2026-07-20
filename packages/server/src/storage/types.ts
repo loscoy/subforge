@@ -1,4 +1,5 @@
 import type { ConversionProfile } from '@subforge/core'
+import type { UserInfo } from '../userinfo.js'
 
 /** 一个订阅源。 */
 export interface Subscription {
@@ -10,6 +11,8 @@ export interface Subscription {
   content?: string
   /** 上次抓取时间（epoch ms） */
   fetchedAt?: number
+  /** 机场返回的流量/到期信息（subscription-userinfo 头） */
+  userInfo?: UserInfo
   createdAt: number
   updatedAt: number
 }

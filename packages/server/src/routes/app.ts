@@ -1,11 +1,13 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { SCRIPT_DTS, getRenderer, listRenderers, type ConversionProfile, type ScriptRunner } from '@subforge/core'
+import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type ConversionProfile, type ScriptRunner } from '@subforge/core'
+import { checkNodes } from '../health.js'
 import type { AgentRunner } from '../agent/index.js'
 import type { ServerConfig } from '../config.js'
 import type { Profile, Storage, Subscription } from '../storage/index.js'
 import {
   buildProfileOutput,
+  collectRawSubscriptions,
   ensureSubscriptionContent,
   previewScript,
   rollbackProfile,
@@ -155,6 +157,15 @@ export function createApp(deps: AppDeps): Hono {
     } catch (e) {
       return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 500)
     }
+  })
+  api.post('/profiles/:id/healthcheck', async (c) => {
+    const p = storage.getProfile(c.req.param('id'))
+    if (!p) return c.json({ error: '不存在' }, 404)
+    const raws = await collectRawSubscriptions(storage, p)
+    const nodes = raws.flatMap((r) => parseSubscription(r))
+    const results = await checkNodes(nodes)
+    const alive = results.filter((r) => r.latency !== null).length
+    return c.json({ total: results.length, alive, results })
   })
   api.get('/profiles/:id/versions', (c) => c.json(storage.listVersions(c.req.param('id'))))
   api.post('/profiles/:id/rollback', async (c) => {

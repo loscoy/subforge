@@ -5,9 +5,11 @@ export * from './config.js'
 // 解析 / 渲染 / 管线
 export { parseUri, parseSubscription } from './parsers/index.js'
 export { b64decode, looksLikeBase64 } from './parsers/util.js'
-export { getRenderer, registerRenderer, listRenderers, renderMihomo } from './renderers/index.js'
+export { getRenderer, registerRenderer, listRenderers, renderMihomo, renderSingbox, renderSurge } from './renderers/index.js'
 export type { Renderer } from './renderers/index.js'
 export { nodeToMihomo, resolveGroupMembers } from './renderers/mihomo.js'
+export { nodeToSingbox, clashRuleToSingbox } from './renderers/singbox.js'
+export { nodeToSurge } from './renderers/surge.js'
 export { runPipeline } from './pipeline.js'
 export type { PipelineInput, PipelineOutput } from './pipeline.js'
 

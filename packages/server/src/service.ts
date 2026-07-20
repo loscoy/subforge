@@ -6,18 +6,21 @@ import {
   type ScriptRunner,
 } from '@subforge/core'
 import type { Profile, Storage, Subscription } from './storage/index.js'
+import { parseUserInfo, type UserInfo } from './userinfo.js'
 import { newId, now } from './util.js'
 
 const DEFAULT_MAX_AGE_MS = 60 * 60 * 1000 // 1h 缓存
 
-/** 抓取订阅内容（带 UA），失败抛错。 */
-export async function fetchSubscriptionContent(url: string): Promise<string> {
+/** 抓取订阅内容（带 UA），返回正文与解析出的流量信息。失败抛错。 */
+export async function fetchSubscriptionContent(url: string): Promise<{ content: string; userInfo?: UserInfo }> {
   const res = await fetch(url, {
     headers: { 'User-Agent': 'clash-verge/1.0 mihomo subforge' },
     redirect: 'follow',
   })
   if (!res.ok) throw new Error(`抓取订阅失败 HTTP ${res.status}`)
-  return await res.text()
+  const content = await res.text()
+  const userInfo = parseUserInfo(res.headers.get('subscription-userinfo'))
+  return { content, userInfo }
 }
 
 /** 确保订阅有较新内容：过期或无缓存则重新抓取并写回。 */
@@ -34,8 +37,14 @@ export async function ensureSubscriptionContent(
     if (sub.content) return sub.content
     throw new Error(`订阅 ${sub.id} 既无 url 也无 content`)
   }
-  const content = await fetchSubscriptionContent(sub.url)
-  const updated: Subscription = { ...sub, content, fetchedAt: now(), updatedAt: now() }
+  const { content, userInfo } = await fetchSubscriptionContent(sub.url)
+  const updated: Subscription = {
+    ...sub,
+    content,
+    userInfo: userInfo ?? sub.userInfo,
+    fetchedAt: now(),
+    updatedAt: now(),
+  }
   storage.upsertSubscription(updated)
   return content
 }

@@ -8,8 +8,13 @@
 - **Phase 1 端到端闭环** ✅ 已完成（解析 6 协议 → Mihomo 渲染 → sqlite → 抓取/缓存 → `/sub/:token`，含 Docker）
 - **Phase 2 可编程** ✅ 已完成（node:vm 沙箱 + 脚本 API/`.d.ts` + Monaco 编辑器 + 实时预览 + 组/规则 + 版本历史/回滚）
 - **Phase 3 Agent** ✅ 已完成（框架无关工具 registry → 内嵌 AI SDK agent + 记忆 + MCP server）
-- **Phase 4 增强** ⏳ 部分（serverless 适配器 / sing-box 等渲染器 / 节点测活 留作后续）
-- **测试**：37 个用例全绿（解析 / 渲染 / 沙箱 / 工具 / 路由 / agent-mock）；含端到端冒烟验证。
+- **Phase 4 增强** ✅ 大部分完成：
+  - ✅ sing-box 渲染器（协议 + 分组 + 规则 best-effort 翻译）
+  - ✅ Surge 渲染器（ss/vmess/trojan/hysteria2，不支持协议优雅跳过）
+  - ✅ 订阅流量/到期（解析 `subscription-userinfo` 头，前端展示）
+  - ✅ 节点测活/延迟（TCP 连接，API 端点 + `test_nodes` agent 工具 + 前端展示）
+  - ⏳ serverless 适配器：需把 `Storage` 全面异步化（KV/D1 异步、当前 sqlite 同步），改动面大且本地无法真机验证，留作独立一档。
+- **测试**：48 个用例全绿（解析 / 渲染 ×3 / 沙箱 / 工具 / 路由 / agent-mock / 测活 / 流量解析）；含多格式与测活端到端冒烟验证。
 
 ## 0. 设计基调（已确定的决策）
 

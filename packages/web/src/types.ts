@@ -1,9 +1,17 @@
+export interface UserInfo {
+  upload?: number
+  download?: number
+  total?: number
+  expire?: number
+}
+
 export interface Subscription {
   id: string
   name: string
   url?: string
   content?: string
   fetchedAt?: number
+  userInfo?: UserInfo
   createdAt: number
   updatedAt: number
 }

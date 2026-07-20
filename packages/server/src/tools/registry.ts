@@ -9,6 +9,7 @@ import {
   saveProfileWithVersion,
 } from '../service.js'
 import { parseSubscription } from '@subforge/core'
+import { checkNodes } from '../health.js'
 
 /** 框架无关的工具定义。MCP server 与内嵌 agent 都是它的薄适配层。 */
 export interface Tool<I extends ZodTypeAny = ZodTypeAny> {
@@ -165,6 +166,23 @@ export function buildTools(): Tool[] {
       async handler({ profileId, versionId }, { storage }) {
         const restored = rollbackProfile(storage, profileId, versionId)
         return { ok: true, name: restored.name }
+      },
+    },
+    {
+      name: 'test_nodes',
+      description: '对某转换档的节点做 TCP 测活/延迟测试，返回每个节点的握手延迟（ms）与存活数。可据此建议按延迟分组或剔除失效节点。',
+      schema: z.object({ profileId: z.string(), limit: z.number().int().positive().max(200).default(50) }),
+      async handler({ profileId, limit }, { storage }) {
+        const p = storage.getProfile(profileId)
+        if (!p) throw new Error('转换档不存在')
+        const raws = await collectRawSubscriptions(storage, p)
+        const nodes = raws.flatMap((r) => parseSubscription(r)).slice(0, limit)
+        const results = await checkNodes(nodes)
+        return {
+          total: results.length,
+          alive: results.filter((r) => r.latency !== null).length,
+          results: results.map((r) => ({ name: r.name, latency: r.latency })),
+        }
       },
     },
     {

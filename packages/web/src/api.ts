@@ -44,6 +44,11 @@ export const api = {
   preview: (id: string, script: string) =>
     req<PreviewResult>(`/profiles/${id}/preview`, { method: 'POST', body: JSON.stringify({ script }) }),
   output: (id: string) => req<{ ok: boolean; config?: string; error?: string }>(`/profiles/${id}/output`),
+  healthcheck: (id: string) =>
+    req<{ total: number; alive: number; results: { name: string; latency: number | null }[] }>(
+      `/profiles/${id}/healthcheck`,
+      { method: 'POST' },
+    ),
   versions: (id: string) => req<{ id: string; note?: string; createdAt: number }[]>(`/profiles/${id}/versions`),
   rollback: (id: string, versionId: string) =>
     req<Profile>(`/profiles/${id}/rollback`, { method: 'POST', body: JSON.stringify({ versionId }) }),

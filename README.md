@@ -13,11 +13,13 @@
 
 ## 功能
 
-- **订阅转换**：解析 `vmess / vless / trojan / ss / hysteria2 / tuic`（URI 或整段 base64），输出 **Mihomo/Clash**（渲染器插件化，留好扩展位）。
+- **订阅转换**：解析 `vmess / vless / trojan / ss / hysteria2 / tuic`（URI 或整段 base64），输出 **Mihomo/Clash、sing-box、Surge**（渲染器插件化，`?target=` 切换）。
 - **自定义组**：`select / url-test / fallback / load-balance`，成员支持 `includeAll`、正则 `filter` / `excludeFilter`、显式 `proxies`。
 - **自定义规则 / 规则集**：内联 rules + 远程 rule-providers。
 - **转换脚本**：在受限沙箱里跑 JS，内置 `utils`（去重 / 正则保留剔除 / 地区打标签 / 唯一命名等）。
 - **实时预览**：编辑即见处理前后节点与 `console` 日志。
+- **订阅流量 / 到期**：解析 `subscription-userinfo` 头，展示已用/总量与到期时间。
+- **节点测活 / 延迟**：TCP 连接测速，按延迟排序、标记失效（也作为 `test_nodes` agent 工具）。
 - **版本历史 / 回滚**：脚本与配置每次改动自动快照。
 - **Token 分享**：每个转换档一个短链 `/sub/:token`，转换好的订阅直接分享给别人用，无需账号。
 - **AI Agent**：兼容 OpenAI 接口，带**跨会话记忆**；同一套工具还暴露为 **MCP server**，可用 Claude Code 等直接驱动。
@@ -28,7 +30,7 @@
 
 | 抽象 | 作用 | 当前实现 | 可替换为 |
 |---|---|---|---|
-| `Renderer` | 节点 → 输出格式 | Mihomo | sing-box / Surge … |
+| `Renderer` | 节点 → 输出格式 | Mihomo / sing-box / Surge | QuantumultX … |
 | `Storage` | 持久化 | sqlite / 内存 | D1 / KV（serverless） |
 | `ScriptRunner` | 脚本沙箱 | node:vm | isolated-vm / QuickJS-wasm |
 | `AgentRunner` | agent 循环 | Vercel AI SDK | Mastra … |
