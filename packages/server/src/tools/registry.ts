@@ -32,7 +32,7 @@ export function buildTools(): Tool[] {
       description: '列出所有订阅源（id、名称、url、节点数缓存状态）。',
       schema: z.object({}),
       async handler(_i, { storage }) {
-        return storage.listSubscriptions().map((s) => ({
+        return (await storage.listSubscriptions()).map((s) => ({
           id: s.id,
           name: s.name,
           url: s.url,
@@ -46,7 +46,7 @@ export function buildTools(): Tool[] {
       description: '列出所有转换档（id、名称、目标格式、关联订阅、分享 token、是否含脚本）。',
       schema: z.object({}),
       async handler(_i, { storage }) {
-        return storage.listProfiles().map((p) => ({
+        return (await storage.listProfiles()).map((p) => ({
           id: p.id,
           name: p.name,
           target: p.target,
@@ -62,7 +62,7 @@ export function buildTools(): Tool[] {
       description: '读取一个转换档的完整内容：转换脚本、代理组、规则、规则集。',
       schema: z.object({ profileId: z.string() }),
       async handler({ profileId }, { storage }) {
-        const p = storage.getProfile(profileId)
+        const p = await storage.getProfile(profileId)
         if (!p) throw new Error('转换档不存在')
         return { id: p.id, name: p.name, target: p.target, script: p.script ?? '', profile: p.profile }
       },
@@ -72,7 +72,7 @@ export function buildTools(): Tool[] {
       description: '获取某转换档解析出的节点样本（默认前 30 个），用于了解有哪些节点、如何分组。',
       schema: z.object({ profileId: z.string(), limit: z.number().int().positive().max(200).default(30) }),
       async handler({ profileId, limit }, { storage }) {
-        const p = storage.getProfile(profileId)
+        const p = await storage.getProfile(profileId)
         if (!p) throw new Error('转换档不存在')
         const raws = await collectRawSubscriptions(storage, p)
         const nodes = raws.flatMap((r) => parseSubscription(r))
@@ -88,7 +88,7 @@ export function buildTools(): Tool[] {
         '对某转换档的真实节点执行一段转换脚本（不保存），返回处理前后的节点数量、样本与 console 日志。用于迭代验证脚本是否正确。',
       schema: z.object({ profileId: z.string(), script: z.string() }),
       async handler({ profileId, script }, { storage, runner }) {
-        const p = storage.getProfile(profileId)
+        const p = await storage.getProfile(profileId)
         if (!p) throw new Error('转换档不存在')
         const r = await previewScript(storage, runner, p, script)
         return {
@@ -106,9 +106,9 @@ export function buildTools(): Tool[] {
       description: '保存某转换档的转换脚本（自动创建版本快照，可回滚）。建议先用 run_preview 验证。',
       schema: z.object({ profileId: z.string(), script: z.string(), note: z.string().optional() }),
       async handler({ profileId, script, note }, { storage }) {
-        const p = storage.getProfile(profileId)
+        const p = await storage.getProfile(profileId)
         if (!p) throw new Error('转换档不存在')
-        saveProfileWithVersion(storage, { ...p, script }, note ?? 'agent 修改脚本')
+        await saveProfileWithVersion(storage, { ...p, script }, note ?? 'agent 修改脚本')
         return { ok: true }
       },
     },
@@ -124,7 +124,7 @@ export function buildTools(): Tool[] {
         note: z.string().optional(),
       }),
       async handler({ profileId, groups, rules, ruleProviders, note }, { storage }) {
-        const p = storage.getProfile(profileId)
+        const p = await storage.getProfile(profileId)
         if (!p) throw new Error('转换档不存在')
         const nextProfile = {
           ...p.profile,
@@ -132,7 +132,7 @@ export function buildTools(): Tool[] {
           ...(rules ? { rules } : {}),
           ...(ruleProviders ? { ruleProviders } : {}),
         }
-        saveProfileWithVersion(storage, { ...p, profile: nextProfile }, note ?? 'agent 修改配置')
+        await saveProfileWithVersion(storage, { ...p, profile: nextProfile }, note ?? 'agent 修改配置')
         return { ok: true, groups: nextProfile.groups.map((g: any) => g.name), ruleCount: nextProfile.rules.length }
       },
     },
@@ -141,7 +141,7 @@ export function buildTools(): Tool[] {
       description: '构建某转换档的最终配置并校验是否成功（不返回全文，只返回是否成功与统计）。',
       schema: z.object({ profileId: z.string() }),
       async handler({ profileId }, { storage, runner }) {
-        const p = storage.getProfile(profileId)
+        const p = await storage.getProfile(profileId)
         if (!p) throw new Error('转换档不存在')
         try {
           const out = await buildProfileOutput(storage, runner, p)
@@ -156,7 +156,7 @@ export function buildTools(): Tool[] {
       description: '列出某转换档的历史版本（用于回滚）。',
       schema: z.object({ profileId: z.string() }),
       async handler({ profileId }, { storage }) {
-        return storage.listVersions(profileId).map((v) => ({ id: v.id, note: v.note, createdAt: v.createdAt }))
+        return (await storage.listVersions(profileId)).map((v) => ({ id: v.id, note: v.note, createdAt: v.createdAt }))
       },
     },
     {
@@ -164,7 +164,7 @@ export function buildTools(): Tool[] {
       description: '把某转换档回滚到指定历史版本。',
       schema: z.object({ profileId: z.string(), versionId: z.string() }),
       async handler({ profileId, versionId }, { storage }) {
-        const restored = rollbackProfile(storage, profileId, versionId)
+        const restored = await rollbackProfile(storage, profileId, versionId)
         return { ok: true, name: restored.name }
       },
     },
@@ -173,7 +173,7 @@ export function buildTools(): Tool[] {
       description: '对某转换档的节点做 TCP 测活/延迟测试，返回每个节点的握手延迟（ms）与存活数。可据此建议按延迟分组或剔除失效节点。',
       schema: z.object({ profileId: z.string(), limit: z.number().int().positive().max(200).default(50) }),
       async handler({ profileId, limit }, { storage }) {
-        const p = storage.getProfile(profileId)
+        const p = await storage.getProfile(profileId)
         if (!p) throw new Error('转换档不存在')
         const raws = await collectRawSubscriptions(storage, p)
         const nodes = raws.flatMap((r) => parseSubscription(r)).slice(0, limit)
@@ -191,7 +191,7 @@ export function buildTools(): Tool[] {
         '更新跨会话「工作记忆」：记录用户长期偏好与项目事实（如命名习惯、常用分组方式、偏好的规则）。会在后续对话中作为上下文提供。',
       schema: z.object({ text: z.string() }),
       async handler({ text }, { storage }) {
-        storage.setWorkingMemory(text)
+        await storage.setWorkingMemory(text)
         return { ok: true }
       },
     },

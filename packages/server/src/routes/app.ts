@@ -36,7 +36,7 @@ export function createApp(deps: AppDeps): Hono {
   // ---- 公开：分享出口 ----
   app.get('/sub/:token', async (c) => {
     const token = c.req.param('token')
-    const profile = storage.getProfileByToken(token)
+    const profile = await storage.getProfileByToken(token)
     if (!profile) return c.text('订阅不存在', 404)
     const target = c.req.query('target') || profile.target
     const force = c.req.query('force') === '1'
@@ -68,7 +68,7 @@ export function createApp(deps: AppDeps): Hono {
   )
 
   // 订阅
-  api.get('/subscriptions', (c) => c.json(storage.listSubscriptions()))
+  api.get('/subscriptions', async (c) => c.json(await storage.listSubscriptions()))
   api.post('/subscriptions', async (c) => {
     const body = await c.req.json<Partial<Subscription>>()
     const sub: Subscription = {
@@ -79,36 +79,36 @@ export function createApp(deps: AppDeps): Hono {
       createdAt: now(),
       updatedAt: now(),
     }
-    storage.upsertSubscription(sub)
+    await storage.upsertSubscription(sub)
     return c.json(sub, 201)
   })
   api.put('/subscriptions/:id', async (c) => {
-    const cur = storage.getSubscription(c.req.param('id'))
+    const cur = await storage.getSubscription(c.req.param('id'))
     if (!cur) return c.json({ error: '不存在' }, 404)
     const body = await c.req.json<Partial<Subscription>>()
     const next: Subscription = { ...cur, ...body, id: cur.id, updatedAt: now() }
-    storage.upsertSubscription(next)
+    await storage.upsertSubscription(next)
     return c.json(next)
   })
-  api.delete('/subscriptions/:id', (c) => {
-    storage.deleteSubscription(c.req.param('id'))
+  api.delete('/subscriptions/:id', async (c) => {
+    await storage.deleteSubscription(c.req.param('id'))
     return c.json({ ok: true })
   })
   api.post('/subscriptions/:id/refresh', async (c) => {
-    const sub = storage.getSubscription(c.req.param('id'))
+    const sub = await storage.getSubscription(c.req.param('id'))
     if (!sub) return c.json({ error: '不存在' }, 404)
     try {
       await ensureSubscriptionContent(storage, sub, 0, true)
-      return c.json(storage.getSubscription(sub.id))
+      return c.json(await storage.getSubscription(sub.id))
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 502)
     }
   })
 
   // 转换档
-  api.get('/profiles', (c) => c.json(storage.listProfiles()))
-  api.get('/profiles/:id', (c) => {
-    const p = storage.getProfile(c.req.param('id'))
+  api.get('/profiles', async (c) => c.json(await storage.listProfiles()))
+  api.get('/profiles/:id', async (c) => {
+    const p = await storage.getProfile(c.req.param('id'))
     return p ? c.json(p) : c.json({ error: '不存在' }, 404)
   })
   api.post('/profiles', async (c) => {
@@ -124,32 +124,32 @@ export function createApp(deps: AppDeps): Hono {
       createdAt: now(),
       updatedAt: now(),
     }
-    storage.upsertProfile(p)
+    await storage.upsertProfile(p)
     return c.json(p, 201)
   })
   api.put('/profiles/:id', async (c) => {
-    const cur = storage.getProfile(c.req.param('id'))
+    const cur = await storage.getProfile(c.req.param('id'))
     if (!cur) return c.json({ error: '不存在' }, 404)
     const body = await c.req.json<Partial<Profile>>()
     const next: Profile = { ...cur, ...body, id: cur.id, token: cur.token }
-    saveProfileWithVersion(storage, next, '手动保存')
-    return c.json(storage.getProfile(cur.id))
+    await saveProfileWithVersion(storage, next, '手动保存')
+    return c.json(await storage.getProfile(cur.id))
   })
-  api.delete('/profiles/:id', (c) => {
-    storage.deleteProfile(c.req.param('id'))
+  api.delete('/profiles/:id', async (c) => {
+    await storage.deleteProfile(c.req.param('id'))
     return c.json({ ok: true })
   })
 
   // 预览 / 输出 / 版本
   api.post('/profiles/:id/preview', async (c) => {
-    const p = storage.getProfile(c.req.param('id'))
+    const p = await storage.getProfile(c.req.param('id'))
     if (!p) return c.json({ error: '不存在' }, 404)
     const { script } = await c.req.json<{ script: string }>()
     const r = await previewScript(storage, runner, p, script ?? p.script ?? '')
     return c.json(r)
   })
   api.get('/profiles/:id/output', async (c) => {
-    const p = storage.getProfile(c.req.param('id'))
+    const p = await storage.getProfile(c.req.param('id'))
     if (!p) return c.json({ error: '不存在' }, 404)
     try {
       const out = await buildProfileOutput(storage, runner, p)
@@ -159,7 +159,7 @@ export function createApp(deps: AppDeps): Hono {
     }
   })
   api.post('/profiles/:id/healthcheck', async (c) => {
-    const p = storage.getProfile(c.req.param('id'))
+    const p = await storage.getProfile(c.req.param('id'))
     if (!p) return c.json({ error: '不存在' }, 404)
     const raws = await collectRawSubscriptions(storage, p)
     const nodes = raws.flatMap((r) => parseSubscription(r))
@@ -167,11 +167,11 @@ export function createApp(deps: AppDeps): Hono {
     const alive = results.filter((r) => r.latency !== null).length
     return c.json({ total: results.length, alive, results })
   })
-  api.get('/profiles/:id/versions', (c) => c.json(storage.listVersions(c.req.param('id'))))
+  api.get('/profiles/:id/versions', async (c) => c.json(await storage.listVersions(c.req.param('id'))))
   api.post('/profiles/:id/rollback', async (c) => {
     const { versionId } = await c.req.json<{ versionId: string }>()
     try {
-      const restored = rollbackProfile(storage, c.req.param('id'), versionId)
+      const restored = await rollbackProfile(storage, c.req.param('id'), versionId)
       return c.json(restored)
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 400)
@@ -179,7 +179,7 @@ export function createApp(deps: AppDeps): Hono {
   })
 
   // Agent
-  api.get('/agent/messages/:threadId', (c) => c.json(storage.listMessages(c.req.param('threadId'))))
+  api.get('/agent/messages/:threadId', async (c) => c.json(await storage.listMessages(c.req.param('threadId'))))
   api.post('/agent/chat', async (c) => {
     if (!deps.makeAgent) return c.json({ error: '未配置 Agent（缺 OPENAI_* 环境变量）' }, 400)
     const { threadId, message } = await c.req.json<{ threadId: string; message: string }>()

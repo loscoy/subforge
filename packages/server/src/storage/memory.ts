@@ -1,6 +1,6 @@
 import type { AgentMessage, Profile, Storage, Subscription, Version } from './types.js'
 
-/** 纯内存实现：用于测试，也可作无持久化的临时运行。 */
+/** 纯内存实现：用于测试，也可作无持久化的临时运行。方法为 async 以符合 Storage 接口。 */
 export class InMemoryStorage implements Storage {
   private subs = new Map<string, Subscription>()
   private profiles = new Map<string, Profile>()
@@ -8,62 +8,62 @@ export class InMemoryStorage implements Storage {
   private messages: AgentMessage[] = []
   private workingMemory = ''
 
-  listSubscriptions(): Subscription[] {
+  async listSubscriptions(): Promise<Subscription[]> {
     return [...this.subs.values()].sort((a, b) => a.createdAt - b.createdAt)
   }
-  getSubscription(id: string) {
+  async getSubscription(id: string) {
     return this.subs.get(id)
   }
-  upsertSubscription(sub: Subscription) {
+  async upsertSubscription(sub: Subscription) {
     this.subs.set(sub.id, sub)
   }
-  deleteSubscription(id: string) {
+  async deleteSubscription(id: string) {
     this.subs.delete(id)
   }
 
-  listProfiles(): Profile[] {
+  async listProfiles(): Promise<Profile[]> {
     return [...this.profiles.values()].sort((a, b) => a.createdAt - b.createdAt)
   }
-  getProfile(id: string) {
+  async getProfile(id: string) {
     return this.profiles.get(id)
   }
-  getProfileByToken(token: string) {
+  async getProfileByToken(token: string) {
     return [...this.profiles.values()].find((p) => p.token === token)
   }
-  upsertProfile(p: Profile) {
+  async upsertProfile(p: Profile) {
     this.profiles.set(p.id, p)
   }
-  deleteProfile(id: string) {
+  async deleteProfile(id: string) {
     this.profiles.delete(id)
   }
 
-  listVersions(entityId: string): Version[] {
+  async listVersions(entityId: string): Promise<Version[]> {
     return [...this.versions.values()]
       .filter((v) => v.entityId === entityId)
       .sort((a, b) => b.createdAt - a.createdAt)
   }
-  getVersion(id: string) {
+  async getVersion(id: string) {
     return this.versions.get(id)
   }
-  addVersion(v: Version) {
+  async addVersion(v: Version) {
     this.versions.set(v.id, v)
   }
 
-  listMessages(threadId: string): AgentMessage[] {
+  async listMessages(threadId: string): Promise<AgentMessage[]> {
     return this.messages.filter((m) => m.threadId === threadId).sort((a, b) => a.createdAt - b.createdAt)
   }
-  addMessage(m: AgentMessage) {
+  async addMessage(m: AgentMessage) {
     this.messages.push(m)
   }
-  clearThread(threadId: string) {
+  async clearThread(threadId: string) {
     this.messages = this.messages.filter((m) => m.threadId !== threadId)
   }
-  getWorkingMemory() {
+  async getWorkingMemory() {
     return this.workingMemory
   }
-  setWorkingMemory(text: string) {
+  async setWorkingMemory(text: string) {
     this.workingMemory = text
   }
 
-  close() {}
+  async close() {}
 }

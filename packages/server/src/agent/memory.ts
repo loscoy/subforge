@@ -22,18 +22,17 @@ export class MemoryManager {
     this.maxHistory = maxHistory
   }
 
-  loadContext(threadId: string): LoadedContext {
-    const wm = this.storage.getWorkingMemory().trim()
+  async loadContext(threadId: string): Promise<LoadedContext> {
+    const wm = (await this.storage.getWorkingMemory()).trim()
     const system = wm ? `${BASE_SYSTEM}\n\n# 已知的用户长期偏好（工作记忆）\n${wm}` : BASE_SYSTEM
-    const msgs = this.storage
-      .listMessages(threadId)
+    const msgs = (await this.storage.listMessages(threadId))
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .slice(-this.maxHistory)
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
     return { system, history: msgs }
   }
 
-  record(threadId: string, role: 'user' | 'assistant', content: string): void {
-    this.storage.addMessage({ id: newId(), threadId, role, content, createdAt: now() })
+  async record(threadId: string, role: 'user' | 'assistant', content: string): Promise<void> {
+    await this.storage.addMessage({ id: newId(), threadId, role, content, createdAt: now() })
   }
 }

@@ -2,7 +2,10 @@ import Database from 'better-sqlite3'
 import type { ConversionProfile } from '@subforge/core'
 import type { AgentMessage, Profile, Storage, Subscription, Version } from './types.js'
 
-/** better-sqlite3 持久化实现。 */
+/**
+ * better-sqlite3 持久化实现。
+ * better-sqlite3 本身是同步 API，这里用 async 方法包一层以符合 Storage 接口。
+ */
 export class SqliteStorage implements Storage {
   private db: Database.Database
 
@@ -35,7 +38,6 @@ export class SqliteStorage implements Storage {
       CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(threadId, createdAt);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
     `)
-    // 旧库补列（幂等）
     const cols = this.db.prepare('PRAGMA table_info(subscriptions)').all() as { name: string }[]
     if (!cols.some((c) => c.name === 'userInfo')) {
       this.db.exec('ALTER TABLE subscriptions ADD COLUMN userInfo TEXT')
@@ -46,14 +48,14 @@ export class SqliteStorage implements Storage {
   private rowToSub(row: any): Subscription {
     return { ...row, userInfo: row.userInfo ? JSON.parse(row.userInfo) : undefined }
   }
-  listSubscriptions(): Subscription[] {
+  async listSubscriptions(): Promise<Subscription[]> {
     return (this.db.prepare('SELECT * FROM subscriptions ORDER BY createdAt').all() as any[]).map((r) => this.rowToSub(r))
   }
-  getSubscription(id: string): Subscription | undefined {
+  async getSubscription(id: string): Promise<Subscription | undefined> {
     const r = this.db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id)
     return r ? this.rowToSub(r) : undefined
   }
-  upsertSubscription(s: Subscription): void {
+  async upsertSubscription(s: Subscription): Promise<void> {
     this.db
       .prepare(
         `INSERT INTO subscriptions (id,name,url,content,fetchedAt,userInfo,createdAt,updatedAt)
@@ -63,7 +65,7 @@ export class SqliteStorage implements Storage {
       )
       .run({ url: null, content: null, fetchedAt: null, ...s, userInfo: s.userInfo ? JSON.stringify(s.userInfo) : null })
   }
-  deleteSubscription(id: string): void {
+  async deleteSubscription(id: string): Promise<void> {
     this.db.prepare('DELETE FROM subscriptions WHERE id = ?').run(id)
   }
 
@@ -75,18 +77,18 @@ export class SqliteStorage implements Storage {
       profile: JSON.parse(row.profile) as ConversionProfile,
     }
   }
-  listProfiles(): Profile[] {
+  async listProfiles(): Promise<Profile[]> {
     return (this.db.prepare('SELECT * FROM profiles ORDER BY createdAt').all() as any[]).map((r) => this.rowToProfile(r))
   }
-  getProfile(id: string): Profile | undefined {
+  async getProfile(id: string): Promise<Profile | undefined> {
     const r = this.db.prepare('SELECT * FROM profiles WHERE id = ?').get(id)
     return r ? this.rowToProfile(r) : undefined
   }
-  getProfileByToken(token: string): Profile | undefined {
+  async getProfileByToken(token: string): Promise<Profile | undefined> {
     const r = this.db.prepare('SELECT * FROM profiles WHERE token = ?').get(token)
     return r ? this.rowToProfile(r) : undefined
   }
-  upsertProfile(p: Profile): void {
+  async upsertProfile(p: Profile): Promise<void> {
     this.db
       .prepare(
         `INSERT INTO profiles (id,name,subscriptionIds,target,script,profile,token,createdAt,updatedAt)
@@ -102,48 +104,48 @@ export class SqliteStorage implements Storage {
         profile: JSON.stringify(p.profile),
       })
   }
-  deleteProfile(id: string): void {
+  async deleteProfile(id: string): Promise<void> {
     this.db.prepare('DELETE FROM profiles WHERE id = ?').run(id)
   }
 
   // ---- 版本 ----
-  listVersions(entityId: string): Version[] {
+  async listVersions(entityId: string): Promise<Version[]> {
     return this.db
       .prepare('SELECT * FROM versions WHERE entityId = ? ORDER BY createdAt DESC')
       .all(entityId) as Version[]
   }
-  getVersion(id: string): Version | undefined {
+  async getVersion(id: string): Promise<Version | undefined> {
     return this.db.prepare('SELECT * FROM versions WHERE id = ?').get(id) as Version | undefined
   }
-  addVersion(v: Version): void {
+  async addVersion(v: Version): Promise<void> {
     this.db
       .prepare('INSERT INTO versions (id,entity,entityId,snapshot,note,createdAt) VALUES (@id,@entity,@entityId,@snapshot,@note,@createdAt)')
       .run({ note: null, ...v })
   }
 
   // ---- 记忆 ----
-  listMessages(threadId: string): AgentMessage[] {
+  async listMessages(threadId: string): Promise<AgentMessage[]> {
     return this.db.prepare('SELECT * FROM messages WHERE threadId = ? ORDER BY createdAt').all(threadId) as AgentMessage[]
   }
-  addMessage(m: AgentMessage): void {
+  async addMessage(m: AgentMessage): Promise<void> {
     this.db
       .prepare('INSERT INTO messages (id,threadId,role,content,createdAt) VALUES (@id,@threadId,@role,@content,@createdAt)')
       .run(m)
   }
-  clearThread(threadId: string): void {
+  async clearThread(threadId: string): Promise<void> {
     this.db.prepare('DELETE FROM messages WHERE threadId = ?').run(threadId)
   }
-  getWorkingMemory(): string {
+  async getWorkingMemory(): Promise<string> {
     const r = this.db.prepare("SELECT v FROM kv WHERE k = 'working_memory'").get() as { v: string } | undefined
     return r?.v ?? ''
   }
-  setWorkingMemory(text: string): void {
+  async setWorkingMemory(text: string): Promise<void> {
     this.db
       .prepare("INSERT INTO kv (k,v) VALUES ('working_memory',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v")
       .run(text)
   }
 
-  close(): void {
+  async close(): Promise<void> {
     this.db.close()
   }
 }

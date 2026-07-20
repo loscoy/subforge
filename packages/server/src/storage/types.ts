@@ -59,32 +59,35 @@ export interface AgentMessage {
   createdAt: number
 }
 
-/** Storage 抽象：Node 用 sqlite，测试用内存，serverless 后续换 KV/D1。 */
+/**
+ * Storage 抽象（异步）：Node 用 sqlite、测试用内存、serverless 用 D1/KV。
+ * 全部方法返回 Promise，以兼容 Cloudflare D1/KV 这类异步存储。
+ */
 export interface Storage {
   // 订阅
-  listSubscriptions(): Subscription[]
-  getSubscription(id: string): Subscription | undefined
-  upsertSubscription(sub: Subscription): void
-  deleteSubscription(id: string): void
+  listSubscriptions(): Promise<Subscription[]>
+  getSubscription(id: string): Promise<Subscription | undefined>
+  upsertSubscription(sub: Subscription): Promise<void>
+  deleteSubscription(id: string): Promise<void>
 
   // 转换档
-  listProfiles(): Profile[]
-  getProfile(id: string): Profile | undefined
-  getProfileByToken(token: string): Profile | undefined
-  upsertProfile(p: Profile): void
-  deleteProfile(id: string): void
+  listProfiles(): Promise<Profile[]>
+  getProfile(id: string): Promise<Profile | undefined>
+  getProfileByToken(token: string): Promise<Profile | undefined>
+  upsertProfile(p: Profile): Promise<void>
+  deleteProfile(id: string): Promise<void>
 
   // 版本历史
-  listVersions(entityId: string): Version[]
-  getVersion(id: string): Version | undefined
-  addVersion(v: Version): void
+  listVersions(entityId: string): Promise<Version[]>
+  getVersion(id: string): Promise<Version | undefined>
+  addVersion(v: Version): Promise<void>
 
   // Agent 记忆
-  listMessages(threadId: string): AgentMessage[]
-  addMessage(m: AgentMessage): void
-  clearThread(threadId: string): void
-  getWorkingMemory(): string
-  setWorkingMemory(text: string): void
+  listMessages(threadId: string): Promise<AgentMessage[]>
+  addMessage(m: AgentMessage): Promise<void>
+  clearThread(threadId: string): Promise<void>
+  getWorkingMemory(): Promise<string>
+  setWorkingMemory(text: string): Promise<void>
 
-  close(): void
+  close(): Promise<void>
 }

@@ -25,7 +25,7 @@ export class AiSdkAgentRunner implements AgentRunner {
   async run(threadId: string, userMessage: string): Promise<AgentReply> {
     const model = this.modelFactory()
 
-    const { system, history } = this.memory.loadContext(threadId)
+    const { system, history } = await this.memory.loadContext(threadId)
     const messages: CoreMessage[] = [
       ...history.map((h) => ({ role: h.role, content: h.content }) as CoreMessage),
       { role: 'user', content: userMessage },
@@ -55,8 +55,8 @@ export class AiSdkAgentRunner implements AgentRunner {
       maxSteps: this.maxSteps,
     })
 
-    this.memory.record(threadId, 'user', userMessage)
-    this.memory.record(threadId, 'assistant', text)
+    await this.memory.record(threadId, 'user', userMessage)
+    await this.memory.record(threadId, 'assistant', text)
 
     return { text, steps }
   }

@@ -45,7 +45,7 @@ export async function ensureSubscriptionContent(
     fetchedAt: now(),
     updatedAt: now(),
   }
-  storage.upsertSubscription(updated)
+  await storage.upsertSubscription(updated)
   return content
 }
 
@@ -57,7 +57,7 @@ export async function collectRawSubscriptions(
 ): Promise<string[]> {
   const raws: string[] = []
   for (const id of profile.subscriptionIds) {
-    const sub = storage.getSubscription(id)
+    const sub = await storage.getSubscription(id)
     if (!sub) continue
     raws.push(await ensureSubscriptionContent(storage, sub, DEFAULT_MAX_AGE_MS, opts.force))
   }
@@ -116,10 +116,10 @@ export async function previewScript(
 }
 
 /** 写入转换档前先快照当前版本，保证可回滚。 */
-export function saveProfileWithVersion(storage: Storage, next: Profile, note?: string): void {
-  const prev = storage.getProfile(next.id)
+export async function saveProfileWithVersion(storage: Storage, next: Profile, note?: string): Promise<void> {
+  const prev = await storage.getProfile(next.id)
   if (prev) {
-    storage.addVersion({
+    await storage.addVersion({
       id: newId(),
       entity: 'profile',
       entityId: prev.id,
@@ -129,14 +129,14 @@ export function saveProfileWithVersion(storage: Storage, next: Profile, note?: s
       createdAt: now(),
     })
   }
-  storage.upsertProfile({ ...next, updatedAt: now() })
+  await storage.upsertProfile({ ...next, updatedAt: now() })
 }
 
 /** 回滚到某个版本快照。 */
-export function rollbackProfile(storage: Storage, profileId: string, versionId: string): Profile {
-  const cur = storage.getProfile(profileId)
+export async function rollbackProfile(storage: Storage, profileId: string, versionId: string): Promise<Profile> {
+  const cur = await storage.getProfile(profileId)
   if (!cur) throw new Error('转换档不存在')
-  const ver = storage.getVersion(versionId)
+  const ver = await storage.getVersion(versionId)
   if (!ver || ver.entityId !== profileId) throw new Error('版本不存在')
   const snap = JSON.parse(ver.snapshot) as { script?: string | null; profile?: Profile['profile']; target?: string; name?: string }
   const restored: Profile = {
@@ -148,6 +148,6 @@ export function rollbackProfile(storage: Storage, profileId: string, versionId: 
     script: snap.script == null ? undefined : snap.script,
   }
   // 回滚本身也留一份快照
-  saveProfileWithVersion(storage, restored, `回滚到版本 ${versionId}`)
+  await saveProfileWithVersion(storage, restored, `回滚到版本 ${versionId}`)
   return restored
 }

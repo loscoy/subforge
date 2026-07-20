@@ -51,13 +51,13 @@ describe('tool registry 集成', () => {
     expect(r.beforeCount).toBe(3)
     expect(r.afterCount).toBe(2)
     // 未保存
-    expect(ctx.storage.getProfile(profile.id)!.script).toBeUndefined()
+    expect((await ctx.storage.getProfile(profile.id))!.script).toBeUndefined()
   })
 
   it('write_script 保存并创建版本，rollback 可回滚', async () => {
     // 第一次保存：快照的是「初始态（无脚本）」
     await tool('write_script').handler({ profileId: profile.id, script: `return utils.keep(nodes, 'HK')` }, ctx)
-    expect(ctx.storage.getProfile(profile.id)!.script).toContain('HK')
+    expect((await ctx.storage.getProfile(profile.id))!.script).toContain('HK')
     const afterFirst: any = await tool('list_versions').handler({ profileId: profile.id }, ctx)
     expect(afterFirst).toHaveLength(1)
     const initialVersionId = afterFirst[0].id // 无脚本态的快照
@@ -69,7 +69,7 @@ describe('tool registry 集成', () => {
 
     // 回滚到初始态版本 → 脚本应被清空
     await tool('rollback_profile').handler({ profileId: profile.id, versionId: initialVersionId }, ctx)
-    expect(ctx.storage.getProfile(profile.id)!.script).toBeUndefined()
+    expect((await ctx.storage.getProfile(profile.id))!.script).toBeUndefined()
   })
 
   it('write_config 更新组与规则', async () => {
@@ -86,7 +86,7 @@ describe('tool registry 集成', () => {
     )
     expect(r.ok).toBe(true)
     expect(r.groups).toContain('🇭🇰 香港')
-    expect(ctx.storage.getProfile(profile.id)!.profile.rules).toHaveLength(2)
+    expect((await ctx.storage.getProfile(profile.id))!.profile.rules).toHaveLength(2)
   })
 
   it('validate_profile 构建成功', async () => {
@@ -101,6 +101,6 @@ describe('tool registry 集成', () => {
 
   it('update_working_memory 写入记忆', async () => {
     await tool('update_working_memory').handler({ text: '用户偏好把香港节点单独分组' }, ctx)
-    expect(ctx.storage.getWorkingMemory()).toContain('香港')
+    expect(await ctx.storage.getWorkingMemory()).toContain('香港')
   })
 })

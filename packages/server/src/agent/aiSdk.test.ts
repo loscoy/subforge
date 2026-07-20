@@ -30,7 +30,7 @@ describe('AiSdkAgentRunner（mock 模型）', () => {
     // 工作记忆注入系统提示
     expect(capturedSystem).toContain('香港节点单独分组')
     // 会话历史落库
-    const msgs = storage.listMessages('thread-1')
+    const msgs = await storage.listMessages('thread-1')
     expect(msgs.map((m) => m.role)).toEqual(['user', 'assistant'])
     expect(msgs[0]!.content).toBe('帮我整理一下节点')
   })
