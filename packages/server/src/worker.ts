@@ -1,9 +1,18 @@
 import type { D1Database, Fetcher } from '@cloudflare/workers-types'
+import releaseSyncVariant from '@jitl/quickjs-wasmfile-release-sync'
+import { newQuickJSWASMModuleFromVariant, newVariant } from 'quickjs-emscripten-core'
 import { AiSdkAgentRunner } from './agent/aiSdk.js'
 import type { ServerConfig } from './config.js'
 import { createApp } from './routes/app.js'
 import { QuickJsRunner } from './sandbox/quickjs.js'
 import { D1Storage } from './storage/d1.js'
+// vendored 到 worker 包内（prebuild 从 node_modules 拷贝）——保证在 worker root 内，
+// 让 wrangler 以 CompiledWasm 模块加载；再经 newVariant 注入，避免运行时字节编译。
+import quickjsWasm from './quickjs.wasm'
+
+/** 边缘 QuickJS 模块 provider：用编译期 import 的 WebAssembly.Module。 */
+const edgeQuickJs = () =>
+  newQuickJSWASMModuleFromVariant(newVariant(releaseSyncVariant, { wasmModule: quickjsWasm as never }))
 
 /**
  * Cloudflare Workers 入口。
@@ -24,7 +33,7 @@ export interface Env {
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const storage = new D1Storage(env.DB)
-    const runner = new QuickJsRunner()
+    const runner = new QuickJsRunner(edgeQuickJs)
 
     const agent =
       env.OPENAI_BASE_URL && env.OPENAI_API_KEY && env.OPENAI_MODEL

@@ -15,7 +15,7 @@
   - ✅ 节点测活/延迟（TCP 连接，API 端点 + `test_nodes` agent 工具 + 前端展示）
   - ✅ **serverless (Cloudflare Workers)**：`Storage` 已全面异步化；新增 `D1Storage`、`QuickJsRunner`（QuickJS-wasm 边缘沙箱）、Workers 入口 `worker.ts`、`wrangler.jsonc`、D1 迁移；前端由 assets 绑定托管。测活在边缘不可用（无原始 TCP）。详见 `docs/DEPLOY_CLOUDFLARE.md`。
 - **测试**：62 个用例全绿（解析 / 渲染 ×3 / node:vm 沙箱 / QuickJS 沙箱 / 存储契约 ×2(含 D1) / 工具 / 路由 / agent-mock / 测活 / 流量解析）。
-- **验证边界**：D1 用「sqlite 伪造 D1」跑通存储契约；Worker 经 `wrangler deploy --dry-run` 打包验证；workerd 运行时验证待实际部署（本机 glibc 过旧无法跑 workerd）。
+- **验证**：D1 用「sqlite 伪造 D1」跑通存储契约单测；**并在 workerd（bookworm 容器内 `wrangler dev`）实测通过**：D1 迁移+读写、QuickJS-wasm 沙箱执行脚本、分享出口输出正确配置。（本机 glibc 2.31 无法直接跑 workerd，故用容器验证。）
 
 ## 0. 设计基调（已确定的决策）
 

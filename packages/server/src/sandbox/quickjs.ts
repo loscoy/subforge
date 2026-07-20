@@ -1,19 +1,33 @@
-import { getQuickJS } from 'quickjs-emscripten'
+import browserVariant from '@jitl/quickjs-singlefile-browser-release-sync'
+import { newQuickJSWASMModuleFromVariant, type QuickJSWASMModule } from 'quickjs-emscripten-core'
 import { scriptUtils, type ProxyNode, type ScriptResult, type ScriptRunner } from '@subforge/core'
 
 /**
  * 基于 QuickJS-wasm 的脚本执行器，用于无 node:vm 的运行时（Cloudflare Workers 等）。
  *
- * 与 NodeVmRunner 的差异：
- * - 强隔离（wasm 内的独立 JS 引擎），比 node:vm 更安全。
- * - 仅支持**同步**脚本（不支持 await）；绝大多数转换脚本是同步的。
- * - 通过 host 桥把真实的 `scriptUtils` 注入 isolate，避免逻辑重复。
+ * 通过 host 桥把真实的 `scriptUtils` 注入 isolate，避免逻辑重复。仅支持**同步**脚本。
+ *
+ * wasm 模块由 provider 注入，以适配不同运行时的 wasm 加载方式：
+ * - Node（默认）：singlefile 变体，wasm 内联 base64，运行时实例化。
+ * - Cloudflare workerd：必须由 Worker 侧 `import wasm from '...'`（编译期成 WebAssembly.Module）
+ *   经 `newVariant({ wasmModule })` 注入——workerd 禁止运行时从字节编译 wasm。
  */
+export type QuickJsModuleProvider = () => Promise<QuickJSWASMModule>
+
+const defaultProvider: QuickJsModuleProvider = () => newQuickJSWASMModuleFromVariant(browserVariant)
+
 export class QuickJsRunner implements ScriptRunner {
+  private modulePromise?: Promise<QuickJSWASMModule>
+  constructor(private readonly provider: QuickJsModuleProvider = defaultProvider) {}
+
+  private getModule(): Promise<QuickJSWASMModule> {
+    return (this.modulePromise ??= this.provider())
+  }
+
   async run(code: string, nodes: ProxyNode[], params: Record<string, string> = {}): Promise<ScriptResult> {
     const start = Date.now()
     const logs: string[] = []
-    const QuickJS = await getQuickJS()
+    const QuickJS = await this.getModule()
     const ctx = QuickJS.newContext()
     try {
       // host: __util(name, argsJson) → JSON(result)

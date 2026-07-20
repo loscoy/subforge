@@ -11,3 +11,4 @@ coverage/
 packages/web/dist/
 .wrangler/
 .dev.vars
+packages/server/src/quickjs.wasm

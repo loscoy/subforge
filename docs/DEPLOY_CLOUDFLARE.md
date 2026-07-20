@@ -39,6 +39,15 @@ npm run cf:deploy              # = wrangler deploy
 
 ## 说明与限制
 
-- **脚本沙箱**：边缘用 QuickJS-wasm，**仅支持同步脚本**（不支持 `await`）；`utils` 通过 host 桥调用与 Node 端完全相同的实现，行为一致。绝大多数转换脚本是同步的。
-- **测活**：`/api/profiles/:id/healthcheck` 与 `test_nodes` 工具依赖原始 TCP（node:net），边缘不可用；需要测活请用 Node 部署。
-- **验证状态**：D1 适配器已用「better-sqlite3 伪造 D1」跑通存储契约测试；Worker 入口已通过 `wrangler deploy --dry-run` 打包验证（含 QuickJS wasm）。在 workerd 上的运行时验证需实际 `wrangler dev`/部署（本仓库开发环境 glibc 过旧无法本地跑 workerd）。
+- **脚本沙箱**：边缘用 QuickJS-wasm，**仅支持同步脚本**（不支持 `await`）；`utils` 通过 host 桥调用与 Node 端完全相同的实现（跨桥参数走 JSON，故正则请用字符串形式传给 `utils.keep/drop`）。
+- **测活**：`/api/profiles/:id/healthcheck` 与 `test_nodes` 工具依赖原始 TCP（node:net），边缘不可用（返回 501）；需要测活请用 Node 部署。
+- **wasm 载入**：workerd 禁止运行时从字节编译 wasm，故构建时把 QuickJS 的 `.wasm` 作为 CompiledWasm 模块 `import` 进来（启动期编译），再经 `newVariant({ wasmModule })` 注入。`.wasm` 需位于 worker 包内，`npm run cf:dev` / `cf:deploy` 会用 `precf:*` 钩子自动把它从 node_modules 拷到 `src/quickjs.wasm`（已 gitignore）。
+
+## 验证状态
+
+已在 **workerd（`node:22-bookworm` 容器内 `wrangler dev`）实测通过**：
+- ✅ D1 建表迁移 + 订阅/转换档的写入与读取
+- ✅ QuickJS-wasm 沙箱在 workerd 内执行转换脚本（脚本剔除节点后 `/sub/:token` 输出正确的 Mihomo 配置）
+- ✅ 管理 API / 分享出口 / 静态资源路由
+
+（本仓库开发宿主 glibc 2.31 无法直接跑 workerd，故用 bookworm 容器验证；D1 逻辑另有「sqlite 伪造 D1」的存储契约单测。）
