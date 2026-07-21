@@ -55,6 +55,22 @@ export const api = {
 
   agentMessages: (threadId: string) =>
     req<{ role: string; content: string }[]>(`/agent/messages/${threadId}`),
-  agentChat: (threadId: string, message: string) =>
-    req<AgentReply>('/agent/chat', { method: 'POST', body: JSON.stringify({ threadId, message }) }),
+  agentChat: (threadId: string, message: string, context?: string) =>
+    req<AgentReply>('/agent/chat', { method: 'POST', body: JSON.stringify({ threadId, message, context }) }),
+
+  listTemplates: () => req<ServerTemplate[]>('/templates'),
+  createTemplate: (b: Partial<ServerTemplate>) => req<ServerTemplate>('/templates', { method: 'POST', body: JSON.stringify(b) }),
+  deleteTemplate: (id: string) => req(`/templates/${id}`, { method: 'DELETE' }),
+  applyTemplate: (id: string, profileId: string) =>
+    req<Profile>(`/templates/${id}/apply`, { method: 'POST', body: JSON.stringify({ profileId }) }),
+}
+
+export interface ServerTemplate {
+  id: string
+  name: string
+  description?: string
+  profile: import('./types').ConversionProfile
+  script?: string
+  createdAt: number
+  updatedAt: number
 }

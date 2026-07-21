@@ -12,8 +12,9 @@ import type { Storage } from './types.js'
  */
 function makeFakeD1(): any {
   const db = new Database(':memory:')
-  const schema = readFileSync(fileURLToPath(new URL('../../migrations/0001_init.sql', import.meta.url)), 'utf-8')
-  db.exec(schema)
+  for (const f of ['0001_init.sql', '0002_templates.sql']) {
+    db.exec(readFileSync(fileURLToPath(new URL(`../../migrations/${f}`, import.meta.url)), 'utf-8'))
+  }
   return {
     prepare(sql: string) {
       const stmt = db.prepare(sql)
@@ -77,6 +78,22 @@ function runContract(name: string, make: () => Storage) {
       const vs = await s.listVersions('p')
       expect(vs.map((v) => v.id)).toEqual(['v2', 'v1'])
       expect((await s.getVersion('v1'))!.entityId).toBe('p')
+    })
+
+    it('模板 CRUD', async () => {
+      const s = make()
+      await s.upsertTemplate({
+        id: 't1', name: '我的模板', description: 'desc',
+        profile: { operations: [{ op: 'dedupe' }], groups: [{ name: 'G', type: 'select', includeAll: true }], rules: ['MATCH,G'] },
+        script: 'return nodes', createdAt: 1, updatedAt: 1,
+      })
+      const got = await s.getTemplate('t1')
+      expect(got!.name).toBe('我的模板')
+      expect(got!.profile.operations).toEqual([{ op: 'dedupe' }])
+      expect(got!.script).toBe('return nodes')
+      expect(await s.listTemplates()).toHaveLength(1)
+      await s.deleteTemplate('t1')
+      expect(await s.getTemplate('t1')).toBeUndefined()
     })
 
     it('消息与工作记忆', async () => {

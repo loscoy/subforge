@@ -1,10 +1,11 @@
-import type { AgentMessage, Profile, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, Profile, StoredTemplate, Storage, Subscription, Version } from './types.js'
 
 /** 纯内存实现：用于测试，也可作无持久化的临时运行。方法为 async 以符合 Storage 接口。 */
 export class InMemoryStorage implements Storage {
   private subs = new Map<string, Subscription>()
   private profiles = new Map<string, Profile>()
   private versions = new Map<string, Version>()
+  private templates = new Map<string, StoredTemplate>()
   private messages: AgentMessage[] = []
   private workingMemory = ''
 
@@ -47,6 +48,19 @@ export class InMemoryStorage implements Storage {
   }
   async addVersion(v: Version) {
     this.versions.set(v.id, v)
+  }
+
+  async listTemplates(): Promise<StoredTemplate[]> {
+    return [...this.templates.values()].sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+  async getTemplate(id: string) {
+    return this.templates.get(id)
+  }
+  async upsertTemplate(t: StoredTemplate) {
+    this.templates.set(t.id, t)
+  }
+  async deleteTemplate(id: string) {
+    this.templates.delete(id)
   }
 
   async listMessages(threadId: string): Promise<AgentMessage[]> {

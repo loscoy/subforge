@@ -1,11 +1,12 @@
 import { COMMON_GROUPS, RULE_PRESETS } from '@subforge/core'
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import { allTemplates, saveUserTemplate } from '../templates'
+import { builtinTemplates, serverToUI, type UITemplate } from '../templates'
 import type { ConversionProfile, NodeOp, Profile, ProxyGroupDef, Subscription } from '../types'
+import { AgentChatPanel } from './AgentChatPanel'
 import { ScriptEditor } from './ScriptEditor'
 
-export function Profiles({ dts, renderers }: { dts: string; renderers: string[] }) {
+export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers: string[]; hasAgent: boolean }) {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [subs, setSubs] = useState<Subscription[]>([])
   const [sel, setSel] = useState<Profile | null>(null)
@@ -45,7 +46,7 @@ export function Profiles({ dts, renderers }: { dts: string; renderers: string[] 
         {!sel ? (
           <div className="card muted">选择或新建一个转换档。</div>
         ) : (
-          <ProfileDetail key={sel.id} profile={sel} subs={subs} dts={dts} renderers={renderers}
+          <ProfileDetail key={sel.id} profile={sel} subs={subs} dts={dts} renderers={renderers} hasAgent={hasAgent}
             onSaved={(p) => { setSel(p); load() }}
             onDeleted={() => { setSel(null); load() }} />
         )}
@@ -82,8 +83,8 @@ function buildOps(f: OpForm): NodeOp[] {
   return ops
 }
 
-function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
-  profile: Profile; subs: Subscription[]; dts: string; renderers: string[]
+function ProfileDetail({ profile, subs, dts, renderers, hasAgent, onSaved, onDeleted }: {
+  profile: Profile; subs: Subscription[]; dts: string; renderers: string[]; hasAgent: boolean
   onSaved: (p: Profile) => void; onDeleted: () => void
 }) {
   const [name, setName] = useState(profile.name)
@@ -99,7 +100,8 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
   const [health, setHealth] = useState<{ alive: number; total: number; results: { name: string; latency: number | null }[] } | null>(null)
   const [testing, setTesting] = useState(false)
 
-  const [templates, setTemplates] = useState(allTemplates())
+  const [templates, setTemplates] = useState<UITemplate[]>(builtinTemplates())
+  const [showAgent, setShowAgent] = useState(false)
   const isOverride = /\bfunction\s+main\s*\(/.test(script)
   const scriptActive = !!script.trim()
   // override 只覆盖「分组/规则」，节点处理可与之共存
@@ -108,17 +110,27 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
   const autoRegion = groups.some((g) => g.autoRegion)
   const setOp = (patch: Partial<OpForm>) => setOpForm((f) => ({ ...f, ...patch }))
 
-  const saveAsTemplate = () => {
+  const reloadTemplates = () =>
+    api.listTemplates().then((l) => setTemplates([...builtinTemplates(), ...serverToUI(l)])).catch(() => {})
+  useEffect(() => { reloadTemplates() }, [])
+
+  // agent 改动后，从服务端刷新表单
+  const reloadFromServer = async () => {
+    const p = await api.getProfile(profile.id)
+    setName(p.name); setTarget(p.target); setSubIds(p.subscriptionIds)
+    setOpForm(parseOps(p.profile.operations)); setGroups(p.profile.groups || []); setRules(p.profile.rules || [])
+    setScript(p.script || ''); setShowScript(!!p.script)
+    onSaved(p); setMsg('已根据 Agent 的改动刷新')
+  }
+
+  const saveAsTemplate = async () => {
     const label = prompt('模板名称：', name + ' 模板')
     if (!label) return
-    saveUserTemplate({
-      key: 'user-' + label + '-' + rules.length + groups.length,
-      label, description: '（我的模板）',
-      profile: { operations: buildOps(opForm), groups, rules },
-      script: script || undefined,
-    })
-    setTemplates(allTemplates())
-    setMsg(`已存为模板「${label}」`)
+    try {
+      await api.createTemplate({ name: label, description: '（我的模板）', profile: { operations: buildOps(opForm), groups, rules }, script: script || undefined })
+      await reloadTemplates()
+      setMsg(`已存为模板「${label}」（服务端，跨设备可用）`)
+    } catch (e) { setErr(String(e)) }
   }
 
   const save = async () => {
@@ -207,7 +219,7 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
           <select defaultValue="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); e.target.value = '' }}
             title="从模板开始">
             <option value="">📋 从模板开始…</option>
-            {templates.map((t) => <option key={t.key} value={t.key}>{t.user ? '★ ' : ''}{t.label} — {t.description}</option>)}
+            {templates.map((t) => <option key={t.key} value={t.key}>{t.serverId ? '★ ' : ''}{t.label} — {t.description}</option>)}
           </select>
           <button onClick={saveAsTemplate} title="把当前配置/脚本存成可复用的模板（存在本浏览器）">存为模板</button>
           <button onClick={() => api.output(profile.id).then((o) => alert(o.ok ? o.config?.slice(0, 6000) : o.error))}>查看输出</button>
@@ -216,6 +228,7 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
             setErr(''); setHealth(null); setTesting(true)
             api.healthcheck(profile.id).then(setHealth).catch((e) => setErr(String(e).includes('501') ? '当前部署不支持测活（边缘运行时）；请用 Node/Docker 部署' : String(e))).finally(() => setTesting(false))
           }}>{testing ? '测活中…' : '测活'}</button>
+          <button className={showAgent ? 'primary' : ''} onClick={() => setShowAgent((v) => !v)}>🤖 Agent</button>
           <div className="spacer" />
           <button className="danger" onClick={() => api.deleteProfile(profile.id).then(onDeleted)}>删除</button>
         </div>
@@ -246,6 +259,22 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
           </div>
         )}
       </div>
+
+      {showAgent && (
+        <div className="card" style={{ borderColor: 'var(--accent)' }}>
+          <h3 style={{ marginTop: 0 }}>🤖 Agent · 对话即改当前档</h3>
+          <div className="muted" style={{ marginBottom: 8 }}>
+            例：「香港节点单独分一组、按延迟测速」「加一条 Netflix 分流」「把当前配置存成模板，叫 家用」「套用模板 家用」。改完会自动刷新表单。
+          </div>
+          <AgentChatPanel
+            threadId={`profile:${profile.id}`}
+            hasAgent={hasAgent}
+            context={`用户正在编辑转换档：id=${profile.id}，name=「${name}」。除非明确指定其它档，所有 read/write/preview/validate/save_template/apply_template 操作都针对这个档（profileId=${profile.id}）。`}
+            onChanged={reloadFromServer}
+            height={300}
+          />
+        </div>
+      )}
 
       {groupsRulesIgnored && (
         <div className="card" style={{ borderColor: 'var(--accent2)' }}>

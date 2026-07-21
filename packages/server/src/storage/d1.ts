@@ -1,6 +1,6 @@
 import type { ConversionProfile } from '@subforge/core'
 import type { D1Database } from '@cloudflare/workers-types'
-import type { AgentMessage, Profile, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, Profile, StoredTemplate, Storage, Subscription, Version } from './types.js'
 
 /**
  * Cloudflare D1 存储实现（异步）。
@@ -96,6 +96,33 @@ export class D1Storage implements Storage {
       .prepare('INSERT INTO versions (id,entity,entityId,snapshot,note,createdAt) VALUES (?,?,?,?,?,?)')
       .bind(v.id, v.entity, v.entityId, v.snapshot, v.note ?? null, v.createdAt)
       .run()
+  }
+
+  // ---- 模板 ----
+  private rowToTemplate(row: any): StoredTemplate {
+    return { ...row, profile: JSON.parse(row.profile) as ConversionProfile }
+  }
+  async listTemplates(): Promise<StoredTemplate[]> {
+    const { results } = await this.db.prepare('SELECT * FROM templates ORDER BY updatedAt DESC').all()
+    return (results as any[]).map((r) => this.rowToTemplate(r))
+  }
+  async getTemplate(id: string): Promise<StoredTemplate | undefined> {
+    const r = await this.db.prepare('SELECT * FROM templates WHERE id = ?').bind(id).first()
+    return r ? this.rowToTemplate(r) : undefined
+  }
+  async upsertTemplate(t: StoredTemplate): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO templates (id,name,description,profile,script,createdAt,updatedAt)
+         VALUES (?,?,?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,
+           profile=excluded.profile,script=excluded.script,updatedAt=excluded.updatedAt`,
+      )
+      .bind(t.id, t.name, t.description ?? null, JSON.stringify(t.profile), t.script ?? null, t.createdAt, t.updatedAt)
+      .run()
+  }
+  async deleteTemplate(id: string): Promise<void> {
+    await this.db.prepare('DELETE FROM templates WHERE id = ?').bind(id).run()
   }
 
   // ---- 记忆 ----

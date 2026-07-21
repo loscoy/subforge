@@ -22,10 +22,11 @@ export class AiSdkAgentRunner implements AgentRunner {
     this.memory = new MemoryManager(toolCtx.storage)
   }
 
-  async run(threadId: string, userMessage: string): Promise<AgentReply> {
+  async run(threadId: string, userMessage: string, context?: string): Promise<AgentReply> {
     const model = this.modelFactory()
 
-    const { system, history } = await this.memory.loadContext(threadId)
+    const { system: baseSystem, history } = await this.memory.loadContext(threadId)
+    const system = context ? `${baseSystem}\n\n# 当前上下文\n${context}` : baseSystem
     const messages: CoreMessage[] = [
       ...history.map((h) => ({ role: h.role, content: h.content }) as CoreMessage),
       { role: 'user', content: userMessage },

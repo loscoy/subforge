@@ -74,7 +74,7 @@ export function App() {
       </div>
       <div className="main">
         {tab === 'subs' && <Subscriptions />}
-        {tab === 'profiles' && meta && <Profiles dts={meta.scriptDts} renderers={meta.renderers} />}
+        {tab === 'profiles' && meta && <Profiles dts={meta.scriptDts} renderers={meta.renderers} hasAgent={!!meta.hasAgent} />}
         {tab === 'agent' && <Agent hasAgent={!!meta?.hasAgent} />}
       </div>
     </div>

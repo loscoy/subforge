@@ -59,6 +59,19 @@ export interface AgentMessage {
   createdAt: number
 }
 
+/** 服务端保存的模板（可跨设备、被 agent 管理）。 */
+export interface StoredTemplate {
+  id: string
+  name: string
+  description?: string
+  /** ConversionProfile（组/规则/操作） */
+  profile: ConversionProfile
+  /** 可选转换脚本（transform 或 override） */
+  script?: string
+  createdAt: number
+  updatedAt: number
+}
+
 /**
  * Storage 抽象（异步）：Node 用 sqlite、测试用内存、serverless 用 D1/KV。
  * 全部方法返回 Promise，以兼容 Cloudflare D1/KV 这类异步存储。
@@ -81,6 +94,12 @@ export interface Storage {
   listVersions(entityId: string): Promise<Version[]>
   getVersion(id: string): Promise<Version | undefined>
   addVersion(v: Version): Promise<void>
+
+  // 模板
+  listTemplates(): Promise<StoredTemplate[]>
+  getTemplate(id: string): Promise<StoredTemplate | undefined>
+  upsertTemplate(t: StoredTemplate): Promise<void>
+  deleteTemplate(id: string): Promise<void>
 
   // Agent 记忆
   listMessages(threadId: string): Promise<AgentMessage[]>

@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import type { ConversionProfile } from '@subforge/core'
-import type { AgentMessage, Profile, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, Profile, StoredTemplate, Storage, Subscription, Version } from './types.js'
 
 /**
  * better-sqlite3 持久化实现。
@@ -37,6 +37,10 @@ export class SqliteStorage implements Storage {
       );
       CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(threadId, createdAt);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS templates (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, profile TEXT NOT NULL,
+        script TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+      );
     `)
     const cols = this.db.prepare('PRAGMA table_info(subscriptions)').all() as { name: string }[]
     if (!cols.some((c) => c.name === 'userInfo')) {
@@ -121,6 +125,30 @@ export class SqliteStorage implements Storage {
     this.db
       .prepare('INSERT INTO versions (id,entity,entityId,snapshot,note,createdAt) VALUES (@id,@entity,@entityId,@snapshot,@note,@createdAt)')
       .run({ note: null, ...v })
+  }
+
+  // ---- 模板 ----
+  private rowToTemplate(row: any): StoredTemplate {
+    return { ...row, profile: JSON.parse(row.profile) as ConversionProfile }
+  }
+  async listTemplates(): Promise<StoredTemplate[]> {
+    return (this.db.prepare('SELECT * FROM templates ORDER BY updatedAt DESC').all() as any[]).map((r) => this.rowToTemplate(r))
+  }
+  async getTemplate(id: string): Promise<StoredTemplate | undefined> {
+    const r = this.db.prepare('SELECT * FROM templates WHERE id = ?').get(id)
+    return r ? this.rowToTemplate(r) : undefined
+  }
+  async upsertTemplate(t: StoredTemplate): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO templates (id,name,description,profile,script,createdAt,updatedAt)
+         VALUES (@id,@name,@description,@profile,@script,@createdAt,@updatedAt)
+         ON CONFLICT(id) DO UPDATE SET name=@name,description=@description,profile=@profile,script=@script,updatedAt=@updatedAt`,
+      )
+      .run({ description: null, script: null, ...t, profile: JSON.stringify(t.profile) })
+  }
+  async deleteTemplate(id: string): Promise<void> {
+    this.db.prepare('DELETE FROM templates WHERE id = ?').run(id)
   }
 
   // ---- 记忆 ----

@@ -10,6 +10,7 @@ import {
 } from '../service.js'
 import { parseSubscription } from '@subforge/core'
 import type { NodeChecker } from '../health.js'
+import { newId, now } from '../util.js'
 
 /** 框架无关的工具定义。MCP server 与内嵌 agent 都是它的薄适配层。 */
 export interface Tool<I extends ZodTypeAny = ZodTypeAny> {
@@ -186,6 +187,56 @@ export function buildTools(): Tool[] {
           alive: results.filter((r) => r.latency !== null).length,
           results: results.map((r) => ({ name: r.name, latency: r.latency })),
         }
+      },
+    },
+    {
+      name: 'list_templates',
+      description: '列出服务端保存的模板（可套用到转换档、或作为参考）。',
+      schema: z.object({}),
+      async handler(_i, { storage }) {
+        return (await storage.listTemplates()).map((t) => ({
+          id: t.id, name: t.name, description: t.description, hasScript: !!t.script,
+          groups: t.profile.groups?.map((g) => g.name) ?? [],
+        }))
+      },
+    },
+    {
+      name: 'save_template',
+      description:
+        '把某转换档的当前配置（节点处理/组/规则/脚本）保存为一个可复用模板。传 id 可覆盖同名模板。',
+      schema: z.object({ profileId: z.string(), name: z.string(), description: z.string().optional(), id: z.string().optional() }),
+      async handler({ profileId, name, description, id }, { storage }) {
+        const p = await storage.getProfile(profileId)
+        if (!p) throw new Error('转换档不存在')
+        const tid = id ?? newId()
+        const existing = id ? await storage.getTemplate(id) : undefined
+        await storage.upsertTemplate({
+          id: tid, name, description, profile: p.profile, script: p.script,
+          createdAt: existing?.createdAt ?? now(), updatedAt: now(),
+        })
+        return { ok: true, id: tid }
+      },
+    },
+    {
+      name: 'apply_template',
+      description: '把一个模板套用到某转换档（覆盖其组/规则/脚本，自动版本快照，可回滚）。',
+      schema: z.object({ templateId: z.string(), profileId: z.string() }),
+      async handler({ templateId, profileId }, { storage }) {
+        const t = await storage.getTemplate(templateId)
+        if (!t) throw new Error('模板不存在')
+        const p = await storage.getProfile(profileId)
+        if (!p) throw new Error('转换档不存在')
+        await saveProfileWithVersion(storage, { ...p, profile: t.profile, script: t.script }, `套用模板「${t.name}」`)
+        return { ok: true }
+      },
+    },
+    {
+      name: 'delete_template',
+      description: '删除一个服务端模板。',
+      schema: z.object({ templateId: z.string() }),
+      async handler({ templateId }, { storage }) {
+        await storage.deleteTemplate(templateId)
+        return { ok: true }
       },
     },
     {

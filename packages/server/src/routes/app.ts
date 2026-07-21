@@ -4,7 +4,7 @@ import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type Convers
 import type { NodeChecker } from '../health.js'
 import type { AgentRunner } from '../agent/index.js'
 import type { ServerConfig } from '../config.js'
-import type { Profile, Storage, Subscription } from '../storage/index.js'
+import type { Profile, StoredTemplate, Storage, Subscription } from '../storage/index.js'
 import {
   buildProfileOutput,
   collectRawSubscriptions,
@@ -181,14 +181,48 @@ export function createApp(deps: AppDeps): Hono {
     }
   })
 
+  // 模板
+  api.get('/templates', async (c) => c.json(await storage.listTemplates()))
+  api.post('/templates', async (c) => {
+    const b = await c.req.json<Partial<StoredTemplate>>()
+    const t: StoredTemplate = {
+      id: newId(), name: b.name || '未命名模板', description: b.description,
+      profile: b.profile || { groups: [], rules: [] }, script: b.script,
+      createdAt: now(), updatedAt: now(),
+    }
+    await storage.upsertTemplate(t)
+    return c.json(t, 201)
+  })
+  api.put('/templates/:id', async (c) => {
+    const cur = await storage.getTemplate(c.req.param('id'))
+    if (!cur) return c.json({ error: '不存在' }, 404)
+    const b = await c.req.json<Partial<StoredTemplate>>()
+    const next: StoredTemplate = { ...cur, ...b, id: cur.id, updatedAt: now() }
+    await storage.upsertTemplate(next)
+    return c.json(next)
+  })
+  api.delete('/templates/:id', async (c) => {
+    await storage.deleteTemplate(c.req.param('id'))
+    return c.json({ ok: true })
+  })
+  api.post('/templates/:id/apply', async (c) => {
+    const t = await storage.getTemplate(c.req.param('id'))
+    if (!t) return c.json({ error: '模板不存在' }, 404)
+    const { profileId } = await c.req.json<{ profileId: string }>()
+    const p = await storage.getProfile(profileId)
+    if (!p) return c.json({ error: '转换档不存在' }, 404)
+    await saveProfileWithVersion(storage, { ...p, profile: t.profile, script: t.script }, `套用模板「${t.name}」`)
+    return c.json(await storage.getProfile(profileId))
+  })
+
   // Agent
   api.get('/agent/messages/:threadId', async (c) => c.json(await storage.listMessages(c.req.param('threadId'))))
   api.post('/agent/chat', async (c) => {
     if (!deps.makeAgent) return c.json({ error: '未配置 Agent（缺 OPENAI_* 环境变量）' }, 400)
-    const { threadId, message } = await c.req.json<{ threadId: string; message: string }>()
+    const { threadId, message, context } = await c.req.json<{ threadId: string; message: string; context?: string }>()
     if (!threadId || !message) return c.json({ error: '缺 threadId 或 message' }, 400)
     try {
-      const reply = await deps.makeAgent().run(threadId, message)
+      const reply = await deps.makeAgent().run(threadId, message, context)
       return c.json(reply)
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
