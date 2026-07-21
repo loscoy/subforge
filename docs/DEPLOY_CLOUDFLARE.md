@@ -37,6 +37,10 @@ npm run cf:deploy              # = wrangler deploy
 
 本地开发：`npm run cf:migrate:local` 后 `npm run cf:dev`。
 
+> ⚠️ **务必用 `wrangler secret put` 设置 `OPENAI_*` / `ADMIN_TOKEN`，不要在 dashboard 里设「明文变量(Variables)」。**
+> `wrangler deploy` 会用配置文件里的 `vars` 覆盖明文变量——配置里没有的会被清空；而加密 secret 跨部署保留。
+> 一键发布：`npm run cf:release`（见下）。
+
 ## 说明与限制
 
 - **脚本沙箱**：边缘用 QuickJS-wasm，**仅支持同步脚本**（不支持 `await`）；`utils` 通过 host 桥调用与 Node 端完全相同的实现（跨桥参数走 JSON，故正则请用字符串形式传给 `utils.keep/drop`）。
