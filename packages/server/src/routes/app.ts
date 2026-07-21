@@ -56,7 +56,7 @@ export function createApp(deps: AppDeps): Hono {
 
   app.get('/healthz', (c) => c.json({ ok: true }))
 
-  // ---- 管理 API（可选鉴权） ----
+  // ---- 管理 API（鉴权：默认失败关闭） ----
   const api = new Hono()
   if (config.adminToken) {
     api.use('*', async (c, next) => {
@@ -64,6 +64,19 @@ export function createApp(deps: AppDeps): Hono {
       if (auth !== config.adminToken) return c.json({ error: '未授权' }, 401)
       await next()
     })
+  } else if (!config.allowNoAuth) {
+    // 未配置口令且未显式允许无鉴权 → 拒绝提供管理接口，避免任意跑脚本/抓 URL 的敞开风险。
+    api.use('*', async (c, _next) =>
+      c.json(
+        {
+          error:
+            '本实例未配置 ADMIN_TOKEN，已拒绝以无鉴权方式提供管理接口。请设置 ADMIN_TOKEN；如确为本地自用需无鉴权，设 SUBFORGE_ALLOW_NO_AUTH=1。',
+        },
+        503,
+      ),
+    )
+  } else {
+    console.warn('⚠ SubForge 正在【无鉴权】模式运行（SUBFORGE_ALLOW_NO_AUTH=1）：任何人都可调用管理接口/执行脚本，切勿暴露到公网。')
   }
 
   api.get('/meta', (c) =>

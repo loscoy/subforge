@@ -5,6 +5,8 @@ export interface ServerConfig {
   dbPath: string
   /** 管理接口口令（Bearer / X-Admin-Token），为空表示不鉴权（仅本地自用时） */
   adminToken?: string
+  /** 未设 adminToken 时是否允许无鉴权提供管理接口。默认 false（失败关闭），需显式开启。 */
+  allowNoAuth?: boolean
   /** 前端静态资源目录（生产环境由后端托管） */
   webDir?: string
   agent?: AgentModelConfig
@@ -20,6 +22,7 @@ export function getConfig(): ServerConfig {
     port: Number(env.PORT ?? 8787),
     dbPath: env.DB_PATH ?? './data/subforge.sqlite',
     adminToken: env.ADMIN_TOKEN || undefined,
+    allowNoAuth: env.SUBFORGE_ALLOW_NO_AUTH === '1',
     webDir: env.WEB_DIR || undefined,
     agent,
   }

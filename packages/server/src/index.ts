@@ -39,6 +39,9 @@ function main() {
     console.log(`SubForge server listening on http://localhost:${info.port}`)
     console.log(`  分享出口: http://localhost:${info.port}/sub/:token`)
     console.log(`  Agent: ${config.agent ? '已启用' : '未配置（设 OPENAI_BASE_URL/API_KEY/MODEL 开启）'}`)
+    if (config.adminToken) console.log('  鉴权: 已启用 ADMIN_TOKEN')
+    else if (config.allowNoAuth) console.warn('  鉴权: ⚠ 无鉴权模式（SUBFORGE_ALLOW_NO_AUTH=1），切勿暴露到公网')
+    else console.warn('  鉴权: 管理接口已锁定（未设 ADMIN_TOKEN）。设 ADMIN_TOKEN 开启，或 SUBFORGE_ALLOW_NO_AUTH=1 显式无鉴权')
   })
 }
 

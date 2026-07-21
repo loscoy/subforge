@@ -25,6 +25,7 @@ export interface Env {
   DB: D1Database
   ASSETS?: Fetcher
   ADMIN_TOKEN?: string
+  SUBFORGE_ALLOW_NO_AUTH?: string
   OPENAI_BASE_URL?: string
   OPENAI_API_KEY?: string
   OPENAI_MODEL?: string
@@ -47,6 +48,7 @@ export default {
       port: 0,
       dbPath: '',
       adminToken: env.ADMIN_TOKEN || undefined,
+      allowNoAuth: env.SUBFORGE_ALLOW_NO_AUTH === '1',
       agent,
     }
 

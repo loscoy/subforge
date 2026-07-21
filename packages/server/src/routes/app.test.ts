@@ -11,7 +11,8 @@ describe('HTTP app', () => {
   let app: ReturnType<typeof createApp>
 
   beforeEach(() => {
-    app = createApp({ storage: new InMemoryStorage(), runner: new NodeVmRunner(), config: getConfig() })
+    // 本地自用：显式允许无鉴权，便于测试管理接口
+    app = createApp({ storage: new InMemoryStorage(), runner: new NodeVmRunner(), config: { ...getConfig(), allowNoAuth: true } })
   })
 
   async function json(res: Response) {
@@ -94,6 +95,37 @@ describe('HTTP app', () => {
 
   it('未知 token 返回 404', async () => {
     const res = await app.fetch(new Request('http://x/sub/nope'))
+    expect(res.status).toBe(404)
+  })
+})
+
+describe('管理接口鉴权（失败关闭）', () => {
+  const mk = (config: Parameters<typeof createApp>[0]['config']) =>
+    createApp({ storage: new InMemoryStorage(), runner: new NodeVmRunner(), config })
+  const base = { ...getConfig(), adminToken: undefined, allowNoAuth: false }
+
+  it('未设口令且未允许无鉵权 → /api 返回 503', async () => {
+    const app = mk(base)
+    const res = await app.fetch(new Request('http://x/api/meta'))
+    expect(res.status).toBe(503)
+  })
+
+  it('显式允许无鉴权 → 放行', async () => {
+    const app = mk({ ...base, allowNoAuth: true })
+    const res = await app.fetch(new Request('http://x/api/meta'))
+    expect(res.status).toBe(200)
+  })
+
+  it('设了口令 → 无/错口令 401，正确口令放行', async () => {
+    const app = mk({ ...base, adminToken: 'secret' })
+    expect((await app.fetch(new Request('http://x/api/meta'))).status).toBe(401)
+    expect((await app.fetch(new Request('http://x/api/meta', { headers: { 'X-Admin-Token': 'wrong' } }))).status).toBe(401)
+    expect((await app.fetch(new Request('http://x/api/meta', { headers: { 'X-Admin-Token': 'secret' } }))).status).toBe(200)
+  })
+
+  it('分享出口 /sub/:token 不受管理鉵权影响（仍公开）', async () => {
+    const app = mk(base) // 无鉴权禁用管理接口，但分享出口应仍可访问（这里未知 token → 404 而非 503/401）
+    const res = await app.fetch(new Request('http://x/sub/whatever'))
     expect(res.status).toBe(404)
   })
 })

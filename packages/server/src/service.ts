@@ -7,6 +7,7 @@ import {
   type ProxyNode,
   type ScriptRunner,
 } from '@subforge/core'
+import { assertPublicHttpUrl } from './net.js'
 import type { Profile, Storage, Subscription } from './storage/index.js'
 import { parseUserInfo, type UserInfo } from './userinfo.js'
 import { newId, now } from './util.js'
@@ -15,6 +16,7 @@ const DEFAULT_MAX_AGE_MS = 60 * 60 * 1000 // 1h 缓存
 
 /** 抓取订阅内容（带 UA），返回正文与解析出的流量信息。失败抛错。 */
 export async function fetchSubscriptionContent(url: string): Promise<{ content: string; userInfo?: UserInfo }> {
+  assertPublicHttpUrl(url) // SSRF 防护：拒绝 localhost/内网/元数据地址
   const res = await fetch(url, {
     headers: { 'User-Agent': 'clash-verge/1.0 mihomo subforge' },
     redirect: 'follow',
