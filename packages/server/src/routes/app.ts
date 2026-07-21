@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
+import { streamSSE } from 'hono/streaming'
 import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type ConversionProfile, type ScriptRunner } from '@subforge/core'
 import type { NodeChecker } from '../health.js'
 import type { AgentRunner } from '../agent/index.js'
@@ -227,6 +228,21 @@ export function createApp(deps: AppDeps): Hono {
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
     }
+  })
+  api.post('/agent/stream', async (c) => {
+    if (!deps.makeAgent) return c.json({ error: '未配置 Agent（缺 OPENAI_* 环境变量）' }, 400)
+    const { threadId, message, context } = await c.req.json<{ threadId: string; message: string; context?: string }>()
+    if (!threadId || !message) return c.json({ error: '缺 threadId 或 message' }, 400)
+    const agent = deps.makeAgent()
+    return streamSSE(c, async (stream) => {
+      try {
+        for await (const ev of agent.runStream(threadId, message, context)) {
+          await stream.writeSSE({ data: JSON.stringify(ev) })
+        }
+      } catch (e) {
+        await stream.writeSSE({ data: JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) }) })
+      }
+    })
   })
 
   app.route('/api', api)

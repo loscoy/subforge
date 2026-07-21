@@ -1,4 +1,4 @@
-import type { AgentReply, Meta, PreviewResult, Profile, Subscription } from './types'
+import type { AgentEvent, AgentReply, Meta, PreviewResult, Profile, Subscription } from './types'
 
 /** 管理口令（若服务端设了 ADMIN_TOKEN），存 localStorage。 */
 export function getToken(): string {
@@ -57,6 +57,39 @@ export const api = {
     req<{ role: string; content: string }[]>(`/agent/messages/${threadId}`),
   agentChat: (threadId: string, message: string, context?: string) =>
     req<AgentReply>('/agent/chat', { method: 'POST', body: JSON.stringify({ threadId, message, context }) }),
+
+  /** 流式对话：SSE，逐事件回调。返回一个可 await 的 Promise（结束时 resolve）。 */
+  async agentStream(
+    threadId: string,
+    message: string,
+    context: string | undefined,
+    on: (ev: AgentEvent) => void,
+  ): Promise<void> {
+    const res = await fetch('/api/agent/stream', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(getToken() ? { 'X-Admin-Token': getToken() } : {}) },
+      body: JSON.stringify({ threadId, message, context }),
+    })
+    if (!res.ok || !res.body) {
+      const t = await res.text().catch(() => '')
+      throw new Error(`${res.status}: ${t}`)
+    }
+    const reader = res.body.getReader()
+    const dec = new TextDecoder()
+    let buf = ''
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      buf += dec.decode(value, { stream: true })
+      const chunks = buf.split('\n\n')
+      buf = chunks.pop() || ''
+      for (const chunk of chunks) {
+        const line = chunk.split('\n').find((l) => l.startsWith('data:'))
+        if (!line) continue
+        try { on(JSON.parse(line.slice(5).trim()) as AgentEvent) } catch { /* ignore */ }
+      }
+    }
+  },
 
   listTemplates: () => req<ServerTemplate[]>('/templates'),
   createTemplate: (b: Partial<ServerTemplate>) => req<ServerTemplate>('/templates', { method: 'POST', body: JSON.stringify(b) }),

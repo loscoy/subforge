@@ -10,6 +10,14 @@ export interface AgentReply {
   steps: AgentStep[]
 }
 
+/** 流式事件。 */
+export type AgentEvent =
+  | { type: 'text'; delta: string }
+  | { type: 'tool-call'; tool: string }
+  | { type: 'tool-result'; tool: string }
+  | { type: 'error'; error: string }
+  | { type: 'done'; text: string }
+
 /** agent 循环抽象。AI SDK 是其一个实现，后续可换 Mastra 等，业务层不动。 */
 export interface AgentRunner {
   /**
@@ -17,6 +25,9 @@ export interface AgentRunner {
    * @param context 可选的即时上下文（如「当前正在编辑的转换档 id/name」），并入系统提示。
    */
   run(threadId: string, userMessage: string, context?: string): Promise<AgentReply>
+
+  /** 流式版本：逐步产出文本增量、工具调用/结果、最终完成事件。 */
+  runStream(threadId: string, userMessage: string, context?: string): AsyncIterable<AgentEvent>
 }
 
 /** LLM 连接配置（OpenAI 兼容）。 */

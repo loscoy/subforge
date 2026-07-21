@@ -73,6 +73,12 @@ export interface AgentReply {
   text: string
   steps: AgentStep[]
 }
+export type AgentEvent =
+  | { type: 'text'; delta: string }
+  | { type: 'tool-call'; tool: string }
+  | { type: 'tool-result'; tool: string }
+  | { type: 'error'; error: string }
+  | { type: 'done'; text: string }
 export interface Meta {
   renderers: string[]
   hasAgent: boolean
