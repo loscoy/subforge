@@ -77,7 +77,7 @@ export function AgentChatPanel({ threadId, context, hasAgent, onChanged, height 
     ) : null
 
   return (
-    <div className="chat" style={fill ? { height: '100%' } : { height }}>
+    <div className={`chat${fill ? ' chat-fill' : ''}`} style={fill ? undefined : { height }}>
       <div className="chat-log" ref={logRef}>
         {items.length === 0 && !live && (
           <div className="muted" style={{ padding: 8 }}>{placeholder || '对我说需求，例如「把香港节点单独分一组」「加一条 Netflix 分流」「把当前配置存成模板 家用」。'}</div>

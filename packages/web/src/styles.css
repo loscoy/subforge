@@ -194,6 +194,8 @@ label { user-select: none; }
 
 /* ---------- 对话 ---------- */
 .chat { display: flex; flex-direction: column; min-height: 0; }
+/* 填充模式：作为 flex 子项伸展，避免依赖 height:100%（Safari 下经 flex 决定的高度无法解析百分比高度） */
+.chat-fill { flex: 1 1 auto; min-height: 0; }
 .chat-log { flex: 1; min-height: 0; overflow: auto; padding: 8px 2px; display: flex; flex-direction: column; gap: 12px; }
 .turn { display: flex; flex-direction: column; gap: 5px; max-width: 90%; }
 .turn.user { align-self: flex-end; align-items: flex-end; }
