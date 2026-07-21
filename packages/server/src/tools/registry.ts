@@ -27,8 +27,8 @@ export interface ToolContext {
   checkNodes?: NodeChecker
 }
 
-/** 工具集合（唯一真相来源）。 */
-export function buildTools(): Tool[] {
+/** 工具集合（唯一真相来源）。caps 可按部署能力裁剪工具（如边缘无测活则去掉 test_nodes）。 */
+export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
   const tools: Tool[] = [
     {
       name: 'list_subscriptions',
@@ -250,5 +250,6 @@ export function buildTools(): Tool[] {
       },
     },
   ]
-  return tools
+  // 边缘运行时无测活能力（node:net 不可用）→ 不暴露 test_nodes，避免模型调用必然失败的工具。
+  return caps?.checkNodes === false ? tools.filter((t) => t.name !== 'test_nodes') : tools
 }

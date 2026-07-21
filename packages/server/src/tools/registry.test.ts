@@ -36,6 +36,12 @@ describe('tool registry 集成', () => {
     storage.upsertProfile(profile)
   })
 
+  it('边缘（无测活能力）时不注册 test_nodes', () => {
+    expect(buildTools().some((t) => t.name === 'test_nodes')).toBe(true)
+    expect(buildTools({ checkNodes: true }).some((t) => t.name === 'test_nodes')).toBe(true)
+    expect(buildTools({ checkNodes: false }).some((t) => t.name === 'test_nodes')).toBe(false)
+  })
+
   it('get_nodes 返回节点样本', async () => {
     const r: any = await tool('get_nodes').handler({ profileId: profile.id, limit: 30 }, ctx)
     expect(r.total).toBe(3)

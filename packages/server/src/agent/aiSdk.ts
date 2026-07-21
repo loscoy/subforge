@@ -33,26 +33,11 @@ export class AiSdkAgentRunner implements AgentRunner {
     ]
 
     const steps: AgentStep[] = []
-    const aiTools = Object.fromEntries(
-      buildTools().map((t) => [
-        t.name,
-        tool({
-          description: t.description,
-          parameters: t.schema,
-          execute: async (args: unknown) => {
-            const result = await t.handler(args as never, this.toolCtx)
-            steps.push({ tool: t.name, args, result })
-            return result
-          },
-        }),
-      ]),
-    )
-
     const { text } = await generateText({
       model,
       system,
       messages,
-      tools: aiTools,
+      tools: this.buildTools(steps),
       maxSteps: this.maxSteps,
     })
 
@@ -62,11 +47,30 @@ export class AiSdkAgentRunner implements AgentRunner {
     return { text, steps }
   }
 
-  private buildTools() {
+  /**
+   * 构建 AI SDK 工具集。工具执行错误一律 catch 并作为「工具结果」返回（{ error }），
+   * 而不是抛出——否则 AI SDK 会把它当致命错误直接中断整段对话。返回错误结果后，
+   * 模型能看到失败原因并自行纠正/改用其它做法。传入 steps 时记录每次调用。
+   */
+  private buildTools(steps?: AgentStep[]) {
     return Object.fromEntries(
-      buildTools().map((t) => [
+      buildTools({ checkNodes: !!this.toolCtx.checkNodes }).map((t) => [
         t.name,
-        tool({ description: t.description, parameters: t.schema, execute: (args: unknown) => t.handler(args as never, this.toolCtx) }),
+        tool({
+          description: t.description,
+          parameters: t.schema,
+          execute: async (args: unknown) => {
+            try {
+              const result = await t.handler(args as never, this.toolCtx)
+              steps?.push({ tool: t.name, args, result })
+              return result
+            } catch (e) {
+              const error = e instanceof Error ? e.message : String(e)
+              steps?.push({ tool: t.name, args, result: { error } })
+              return { error }
+            }
+          },
+        }),
       ]),
     )
   }
