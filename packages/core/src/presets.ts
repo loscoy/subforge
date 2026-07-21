@@ -104,7 +104,44 @@ export interface Template {
   label: string
   description: string
   profile: ConversionProfile
+  /** 可选：模板自带转换脚本（transform 或 override 覆写） */
+  script?: string
 }
+
+/** 一个可直接改的 override 覆写起步脚本：按地区自动分组 + 基础分流。 */
+const OVERRIDE_STARTER = `// override 覆写脚本：接收完整 Clash 配置，返回完整配置。改这里即可完全自定义。
+function main(config) {
+  const proxies = config.proxies || [];
+  const regions = [
+    { name: '🇭🇰 香港', re: /香港|HK|Hong ?Kong/i },
+    { name: '🇹🇼 台湾', re: /台湾|台灣|TW|Taiwan/i },
+    { name: '🇯🇵 日本', re: /日本|JP|Japan/i },
+    { name: '🇸🇬 新加坡', re: /新加坡|狮城|SG|Singapore/i },
+    { name: '🇺🇸 美国', re: /美国|美國|US|United ?States/i },
+    { name: '🇰🇷 韩国', re: /韩国|韓國|KR|Korea/i },
+  ];
+  const regionGroups = regions
+    .filter(r => proxies.some(p => r.re.test(p.name)))
+    .map(r => ({ name: r.name, type: 'url-test', 'include-all': true, filter: r.re.source,
+      url: 'https://www.gstatic.com/generate_204', interval: 300 }));
+  const names = regionGroups.map(g => g.name);
+  return {
+    proxies: proxies,
+    'proxy-groups': [
+      { name: '节点选择', type: 'select', proxies: [...names, '自动选择', 'DIRECT'], 'include-all': true },
+      { name: '自动选择', type: 'url-test', 'include-all': true,
+        url: 'https://www.gstatic.com/generate_204', interval: 300 },
+      ...regionGroups,
+    ],
+    rules: [
+      'GEOSITE,category-ads-all,REJECT',
+      'GEOSITE,cn,DIRECT',
+      'GEOIP,CN,DIRECT,no-resolve',
+      'MATCH,节点选择',
+    ],
+  };
+}
+`
 
 export const TEMPLATES: Template[] = [
   {
@@ -133,5 +170,12 @@ export const TEMPLATES: Template[] = [
     label: '极简',
     description: '去重 + 地区自动分组，规则只保留国内直连兜底。',
     profile: assembleProfile({ dedupe: true, tagRegions: true, autoRegion: true, presets: ['cn'] }),
+  },
+  {
+    key: 'override-starter',
+    label: 'override 起步（写脚本）',
+    description: '一段可直接改的覆写脚本：地区自动分组 + 去广告/国内直连。适合想完全用脚本控制的人。',
+    profile: { operations: [{ op: 'dedupe' }], groups: [], rules: [] },
+    script: OVERRIDE_STARTER,
   },
 ]

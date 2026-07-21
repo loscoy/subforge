@@ -71,4 +71,18 @@ describe('runPipeline 自动识别 override 脚本', () => {
     expect(out.config).toContain('美国')
     expect(out.config).not.toContain('IGNORED') // profile 组被忽略，用脚本的
   })
+
+  it('节点处理 operations 与 override 共存：drop 先于脚本生效', async () => {
+    const raw = 'trojan://p1@hk.com:443#🇭🇰 HK 01\ntrojan://p2@us.com:443#🇺🇸 US 01'
+    const out = await runPipeline({
+      rawSubscriptions: [raw],
+      target: 'mihomo',
+      // operations 剔除美国，override 脚本再分组
+      profile: { operations: [{ op: 'drop', pattern: 'US|美国' }], groups: [], rules: [] },
+      script: OVERRIDE,
+      runner: new NodeVmRunner(),
+    })
+    expect(out.config).toContain('🇭🇰 HK 01')
+    expect(out.config).not.toContain('🇺🇸 US 01') // 已被 operations 剔除，未进入 main(config)
+  })
 })

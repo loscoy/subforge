@@ -1,6 +1,7 @@
-import { COMMON_GROUPS, RULE_PRESETS, TEMPLATES } from '@subforge/core'
-import { useEffect, useMemo, useState } from 'react'
+import { COMMON_GROUPS, RULE_PRESETS } from '@subforge/core'
+import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { allTemplates, saveUserTemplate } from '../templates'
 import type { ConversionProfile, NodeOp, Profile, ProxyGroupDef, Subscription } from '../types'
 import { ScriptEditor } from './ScriptEditor'
 
@@ -98,11 +99,27 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
   const [health, setHealth] = useState<{ alive: number; total: number; results: { name: string; latency: number | null }[] } | null>(null)
   const [testing, setTesting] = useState(false)
 
+  const [templates, setTemplates] = useState(allTemplates())
   const isOverride = /\bfunction\s+main\s*\(/.test(script)
   const scriptActive = !!script.trim()
+  // override 只覆盖「分组/规则」，节点处理可与之共存
+  const groupsRulesIgnored = scriptActive && isOverride
   const shareUrl = `${location.origin}/sub/${profile.token}`
   const autoRegion = groups.some((g) => g.autoRegion)
   const setOp = (patch: Partial<OpForm>) => setOpForm((f) => ({ ...f, ...patch }))
+
+  const saveAsTemplate = () => {
+    const label = prompt('模板名称：', name + ' 模板')
+    if (!label) return
+    saveUserTemplate({
+      key: 'user-' + label + '-' + rules.length + groups.length,
+      label, description: '（我的模板）',
+      profile: { operations: buildOps(opForm), groups, rules },
+      script: script || undefined,
+    })
+    setTemplates(allTemplates())
+    setMsg(`已存为模板「${label}」`)
+  }
 
   const save = async () => {
     setErr(''); setMsg('')
@@ -119,13 +136,14 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
   }
 
   const applyTemplate = (key: string) => {
-    const t = TEMPLATES.find((x) => x.key === key)
+    const t = templates.find((x) => x.key === key)
     if (!t) return
-    if (!confirm(`套用模板「${t.label}」会覆盖当前的节点处理/分组/规则，继续？`)) return
+    if (!confirm(`套用模板「${t.label}」会覆盖当前的节点处理/分组/规则/脚本，继续？`)) return
     setOpForm(parseOps(t.profile.operations))
     setGroups(structuredClone(t.profile.groups))
     setRules([...t.profile.rules])
-    setScript('')
+    setScript(t.script || '')
+    setShowScript(!!t.script)
   }
 
   const toggleAutoRegion = () => {
@@ -189,8 +207,9 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
           <select defaultValue="" onChange={(e) => { if (e.target.value) applyTemplate(e.target.value); e.target.value = '' }}
             title="从模板开始">
             <option value="">📋 从模板开始…</option>
-            {TEMPLATES.map((t) => <option key={t.key} value={t.key}>{t.label} — {t.description}</option>)}
+            {templates.map((t) => <option key={t.key} value={t.key}>{t.user ? '★ ' : ''}{t.label} — {t.description}</option>)}
           </select>
+          <button onClick={saveAsTemplate} title="把当前配置/脚本存成可复用的模板（存在本浏览器）">存为模板</button>
           <button onClick={() => api.output(profile.id).then((o) => alert(o.ok ? o.config?.slice(0, 6000) : o.error))}>查看输出</button>
           <button onClick={() => { setErr(''); api.versions(profile.id).then(setVersions).catch((e) => setErr(String(e))) }}>版本历史</button>
           <button disabled={testing} onClick={() => {
@@ -228,18 +247,19 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
         )}
       </div>
 
-      {scriptActive && isOverride && (
+      {groupsRulesIgnored && (
         <div className="card" style={{ borderColor: 'var(--accent2)' }}>
           <b style={{ color: 'var(--accent2)' }}>当前为 override 覆写脚本模式</b>
           <div className="muted" style={{ marginTop: 4 }}>
-            下面的「节点处理 / 代理组 / 规则」将被<b>忽略</b>，一切以脚本 <span className="mono">main(config)</span> 的产出为准。
+            「② 代理组 / ③ 规则」由脚本 <span className="mono">main(config)</span> 全权生成，此处配置被<b>忽略</b>；
+            但「① 节点处理」仍会在脚本之前生效（去重/过滤/重命名等），可与覆写脚本<b>共存</b>。
           </div>
         </div>
       )}
 
-      {/* 节点处理 */}
-      <fieldset className="card" disabled={scriptActive && isOverride} style={{ border: '1px solid var(--border)' }}>
-        <h3>① 节点处理</h3>
+      {/* 节点处理：与 override 共存 */}
+      <fieldset className="card" style={{ border: '1px solid var(--border)' }}>
+        <h3>① 节点处理{groupsRulesIgnored && <span className="muted" style={{ fontWeight: 400 }}>（覆写脚本前生效）</span>}</h3>
         <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
           <label style={{ width: 'auto', display: 'flex', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={opForm.dedupe} onChange={(e) => setOp({ dedupe: e.target.checked })} />去重</label>
           <label style={{ width: 'auto', display: 'flex', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={opForm.tagRegions} onChange={(e) => setOp({ tagRegions: e.target.checked })} />地区打标签</label>
@@ -256,7 +276,7 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
       </fieldset>
 
       {/* 代理组 */}
-      <fieldset className="card" disabled={scriptActive && isOverride} style={{ border: '1px solid var(--border)' }}>
+      <fieldset className="card" disabled={groupsRulesIgnored} style={{ border: '1px solid var(--border)', opacity: groupsRulesIgnored ? 0.5 : 1 }}>
         <h3>② 代理组</h3>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
           <label style={{ width: 'auto', display: 'flex', gap: 4 }}><input type="checkbox" style={{ width: 'auto' }} checked={autoRegion} onChange={toggleAutoRegion} /><b>地区自动分组</b>（按实际节点生成 HK/US/JP… 测速组）</label>
@@ -288,7 +308,7 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
       </fieldset>
 
       {/* 规则 */}
-      <fieldset className="card" disabled={scriptActive && isOverride} style={{ border: '1px solid var(--border)' }}>
+      <fieldset className="card" disabled={groupsRulesIgnored} style={{ border: '1px solid var(--border)', opacity: groupsRulesIgnored ? 0.5 : 1 }}>
         <h3>③ 分流规则</h3>
         <div className="muted">分流预设（勾选自动加分组+规则）</div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', margin: '6px 0 12px' }}>

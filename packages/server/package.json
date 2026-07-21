@@ -14,6 +14,7 @@
     "cf:dev": "wrangler dev",
     "precf:deploy": "npm run cf:wasm",
     "cf:deploy": "wrangler deploy",
+    "cf:release": "node scripts/cf-release.mjs",
     "cf:migrate:local": "wrangler d1 migrations apply subforge --local",
     "cf:migrate:remote": "wrangler d1 migrations apply subforge --remote",
     "test": "vitest run"

@@ -12,3 +12,6 @@ packages/web/dist/
 .wrangler/
 .dev.vars
 packages/server/src/quickjs.wasm
+
+packages/server/.cf-release.json
+packages/server/wrangler.jsonc.bak
