@@ -32,7 +32,14 @@ export class MemoryManager {
     return { system, history: msgs }
   }
 
-  async record(threadId: string, role: 'user' | 'assistant', content: string): Promise<void> {
-    await this.storage.addMessage({ id: newId(), threadId, role, content, createdAt: now() })
+  async record(threadId: string, role: 'user' | 'assistant', content: string, tools?: string[]): Promise<void> {
+    await this.storage.addMessage({
+      id: newId(),
+      threadId,
+      role,
+      content,
+      tools: tools && tools.length ? tools : undefined,
+      createdAt: now(),
+    })
   }
 }

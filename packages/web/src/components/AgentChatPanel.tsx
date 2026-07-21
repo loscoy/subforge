@@ -32,17 +32,22 @@ export function AgentChatPanel({ threadId, context, hasAgent, onChanged, height,
   const [live, setLive] = useState<{ text: string; tools: string[] } | null>(null)
   const turn = useRef<{ text: string; tools: string[] }>({ text: '', tools: [] })
   const logRef = useRef<HTMLDivElement>(null)
+  // 是否「贴底」：仅当用户已在底部附近时才随新内容自动滚动，避免打断用户上翻查看历史
+  const stick = useRef(true)
 
   useEffect(() => {
     api.agentMessages(threadId).then((msgs) =>
-      setItems(msgs.map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content }))),
+      setItems(msgs
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content, tools: m.tools }))),
     ).catch(() => {})
   }, [threadId])
-  useEffect(() => { logRef.current?.scrollTo(0, logRef.current.scrollHeight) }, [items, live])
+  useEffect(() => { if (stick.current) logRef.current?.scrollTo(0, logRef.current.scrollHeight) }, [items, live])
 
   const send = async () => {
     if (!input.trim() || busy) return
     const message = input.trim(); setInput(''); setErr('')
+    stick.current = true // 发送后回到底部跟随本轮输出
     setItems((c) => [...c, { role: 'user', content: message }])
     turn.current = { text: '', tools: [] }
     setLive({ text: '', tools: [] })
@@ -80,7 +85,14 @@ export function AgentChatPanel({ threadId, context, hasAgent, onChanged, height,
 
   return (
     <div className={`chat${fill ? ' chat-fill' : ''}`} style={fill ? undefined : { height }}>
-      <div className="chat-log" ref={logRef}>
+      <div
+        className="chat-log"
+        ref={logRef}
+        onScroll={(e) => {
+          const el = e.currentTarget
+          stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
+        }}
+      >
         {items.length === 0 && !live && (
           <div className="muted" style={{ padding: 8 }}>{placeholder || '对我说需求，例如「把香港节点单独分一组」「加一条 Netflix 分流」「把当前配置存成模板 家用」。'}</div>
         )}

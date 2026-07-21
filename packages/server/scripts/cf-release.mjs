@@ -42,6 +42,8 @@ try {
   execSync('npm run build', { cwd: repoRoot, stdio: 'inherit' })
   console.log('▶ 拷贝 QuickJS wasm …')
   execSync('node scripts/copy-quickjs-wasm.mjs', { cwd: serverDir, stdio: 'inherit', env })
+  console.log('▶ 应用 D1 远程迁移（仅未应用的会执行）…')
+  execSync('npx wrangler d1 migrations apply subforge --remote', { cwd: serverDir, stdio: 'inherit', env })
   console.log('▶ 部署到 Cloudflare …')
   execSync('npx wrangler deploy', { cwd: serverDir, stdio: 'inherit', env })
   console.log('✅ 部署完成')

@@ -30,10 +30,13 @@ export interface Env {
   OPENAI_MODEL?: string
 }
 
+// 模块作用域：同一 isolate 内跨请求复用，QuickJS WASM 模块只实例化一次（首个请求后显著变快）。
+// 只依赖 edgeQuickJs（无 env），可安全提升；storage 依赖 env.DB 故仍按请求创建。
+const runner = new QuickJsRunner(edgeQuickJs)
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const storage = new D1Storage(env.DB)
-    const runner = new QuickJsRunner(edgeQuickJs)
 
     const agent =
       env.OPENAI_BASE_URL && env.OPENAI_API_KEY && env.OPENAI_MODEL

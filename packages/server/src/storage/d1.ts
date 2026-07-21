@@ -131,12 +131,12 @@ export class D1Storage implements Storage {
       .prepare('SELECT * FROM messages WHERE threadId = ? ORDER BY createdAt')
       .bind(threadId)
       .all()
-    return results as unknown as AgentMessage[]
+    return (results as any[]).map((r) => ({ ...r, tools: r.tools ? JSON.parse(r.tools) : undefined })) as AgentMessage[]
   }
   async addMessage(m: AgentMessage): Promise<void> {
     await this.db
-      .prepare('INSERT INTO messages (id,threadId,role,content,createdAt) VALUES (?,?,?,?,?)')
-      .bind(m.id, m.threadId, m.role, m.content, m.createdAt)
+      .prepare('INSERT INTO messages (id,threadId,role,content,tools,createdAt) VALUES (?,?,?,?,?,?)')
+      .bind(m.id, m.threadId, m.role, m.content, m.tools ? JSON.stringify(m.tools) : null, m.createdAt)
       .run()
   }
   async clearThread(threadId: string): Promise<void> {

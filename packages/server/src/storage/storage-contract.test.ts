@@ -12,7 +12,7 @@ import type { Storage } from './types.js'
  */
 function makeFakeD1(): any {
   const db = new Database(':memory:')
-  for (const f of ['0001_init.sql', '0002_templates.sql']) {
+  for (const f of ['0001_init.sql', '0002_templates.sql', '0003_message_tools.sql']) {
     db.exec(readFileSync(fileURLToPath(new URL(`../../migrations/${f}`, import.meta.url)), 'utf-8'))
   }
   return {
@@ -99,8 +99,12 @@ function runContract(name: string, make: () => Storage) {
     it('消息与工作记忆', async () => {
       const s = make()
       await s.addMessage({ id: 'm1', threadId: 't', role: 'user', content: 'hi', createdAt: 1 })
-      await s.addMessage({ id: 'm2', threadId: 't', role: 'assistant', content: 'yo', createdAt: 2 })
-      expect((await s.listMessages('t')).map((m) => m.content)).toEqual(['hi', 'yo'])
+      await s.addMessage({ id: 'm2', threadId: 't', role: 'assistant', content: 'yo', tools: ['run_preview', 'write_config'], createdAt: 2 })
+      const msgs = await s.listMessages('t')
+      expect(msgs.map((m) => m.content)).toEqual(['hi', 'yo'])
+      // 工具调用名随 assistant 消息持久化（刷新后仍能展示工具链）
+      expect(msgs[0].tools).toBeUndefined()
+      expect(msgs[1].tools).toEqual(['run_preview', 'write_config'])
       expect(await s.getWorkingMemory()).toBe('')
       await s.setWorkingMemory('偏好香港分组')
       await s.setWorkingMemory('偏好香港分组+US')

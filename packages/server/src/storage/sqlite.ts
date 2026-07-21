@@ -33,7 +33,7 @@ export class SqliteStorage implements Storage {
       CREATE INDEX IF NOT EXISTS idx_versions_entity ON versions(entityId, createdAt DESC);
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY, threadId TEXT NOT NULL, role TEXT NOT NULL,
-        content TEXT NOT NULL, createdAt INTEGER NOT NULL
+        content TEXT NOT NULL, tools TEXT, createdAt INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(threadId, createdAt);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -45,6 +45,10 @@ export class SqliteStorage implements Storage {
     const cols = this.db.prepare('PRAGMA table_info(subscriptions)').all() as { name: string }[]
     if (!cols.some((c) => c.name === 'userInfo')) {
       this.db.exec('ALTER TABLE subscriptions ADD COLUMN userInfo TEXT')
+    }
+    const msgCols = this.db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]
+    if (!msgCols.some((c) => c.name === 'tools')) {
+      this.db.exec('ALTER TABLE messages ADD COLUMN tools TEXT')
     }
   }
 
@@ -153,12 +157,13 @@ export class SqliteStorage implements Storage {
 
   // ---- 记忆 ----
   async listMessages(threadId: string): Promise<AgentMessage[]> {
-    return this.db.prepare('SELECT * FROM messages WHERE threadId = ? ORDER BY createdAt').all(threadId) as AgentMessage[]
+    const rows = this.db.prepare('SELECT * FROM messages WHERE threadId = ? ORDER BY createdAt').all(threadId) as any[]
+    return rows.map((r) => ({ ...r, tools: r.tools ? JSON.parse(r.tools) : undefined }))
   }
   async addMessage(m: AgentMessage): Promise<void> {
     this.db
-      .prepare('INSERT INTO messages (id,threadId,role,content,createdAt) VALUES (@id,@threadId,@role,@content,@createdAt)')
-      .run(m)
+      .prepare('INSERT INTO messages (id,threadId,role,content,tools,createdAt) VALUES (@id,@threadId,@role,@content,@tools,@createdAt)')
+      .run({ id: m.id, threadId: m.threadId, role: m.role, content: m.content, tools: m.tools ? JSON.stringify(m.tools) : null, createdAt: m.createdAt })
   }
   async clearThread(threadId: string): Promise<void> {
     this.db.prepare('DELETE FROM messages WHERE threadId = ?').run(threadId)

@@ -56,6 +56,8 @@ export interface AgentMessage {
   threadId: string
   role: 'user' | 'assistant' | 'tool' | 'system'
   content: string
+  /** assistant 消息附带的本轮工具调用名（用于刷新后仍能展示工具链）。 */
+  tools?: string[]
   createdAt: number
 }
 

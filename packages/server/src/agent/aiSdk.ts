@@ -42,7 +42,7 @@ export class AiSdkAgentRunner implements AgentRunner {
     })
 
     await this.memory.record(threadId, 'user', userMessage)
-    await this.memory.record(threadId, 'assistant', text)
+    await this.memory.record(threadId, 'assistant', text, steps.map((s) => s.tool))
 
     return { text, steps }
   }
@@ -86,12 +86,14 @@ export class AiSdkAgentRunner implements AgentRunner {
 
     const result = streamText({ model, system, messages, tools: this.buildTools(), maxSteps: this.maxSteps })
     let finalText = ''
+    const usedTools: string[] = []
     try {
       for await (const part of result.fullStream) {
         if (part.type === 'text-delta') {
           finalText += part.textDelta
           yield { type: 'text', delta: part.textDelta }
         } else if (part.type === 'tool-call') {
+          usedTools.push(part.toolName)
           yield { type: 'tool-call', tool: part.toolName }
         } else if (part.type === 'tool-result') {
           yield { type: 'tool-result', tool: part.toolName }
@@ -104,7 +106,7 @@ export class AiSdkAgentRunner implements AgentRunner {
     }
 
     await this.memory.record(threadId, 'user', userMessage)
-    await this.memory.record(threadId, 'assistant', finalText)
+    await this.memory.record(threadId, 'assistant', finalText, usedTools)
     yield { type: 'done', text: finalText }
   }
 }

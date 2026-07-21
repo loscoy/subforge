@@ -54,7 +54,7 @@ export const api = {
     req<Profile>(`/profiles/${id}/rollback`, { method: 'POST', body: JSON.stringify({ versionId }) }),
 
   agentMessages: (threadId: string) =>
-    req<{ role: string; content: string }[]>(`/agent/messages/${threadId}`),
+    req<{ role: string; content: string; tools?: string[] }[]>(`/agent/messages/${threadId}`),
   agentChat: (threadId: string, message: string, context?: string) =>
     req<AgentReply>('/agent/chat', { method: 'POST', body: JSON.stringify({ threadId, message, context }) }),
 

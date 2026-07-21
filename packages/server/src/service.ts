@@ -57,13 +57,15 @@ export async function collectRawSubscriptions(
   profile: Profile,
   opts: { force?: boolean } = {},
 ): Promise<string[]> {
-  const raws: string[] = []
-  for (const id of profile.subscriptionIds) {
-    const sub = await storage.getSubscription(id)
-    if (!sub) continue
-    raws.push(await ensureSubscriptionContent(storage, sub, DEFAULT_MAX_AGE_MS, opts.force))
-  }
-  return raws
+  // 并行抓取各订阅：总耗时从「逐个求和」变为「取最慢的一个」。保持原始顺序。
+  const raws = await Promise.all(
+    profile.subscriptionIds.map(async (id) => {
+      const sub = await storage.getSubscription(id)
+      if (!sub) return null
+      return ensureSubscriptionContent(storage, sub, DEFAULT_MAX_AGE_MS, opts.force)
+    }),
+  )
+  return raws.filter((r): r is string => r !== null)
 }
 
 /** 端到端构建一个转换档的输出配置。 */
