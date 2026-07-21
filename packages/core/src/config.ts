@@ -22,7 +22,26 @@ export interface ProxyGroupDef {
   interval?: number
   tolerance?: number
   icon?: string
+  /**
+   * 地区自动分组：为 true 时，构建期按实际节点里出现的地区，
+   * 展开成「每个地区一个 url-test 组」（继承本组的 type/url/interval）。
+   */
+  autoRegion?: boolean
 }
+
+/**
+ * 声明式节点处理操作（可视化编辑器用，无需写脚本）。构建期按顺序执行。
+ */
+export type NodeOp =
+  | { op: 'dedupe' }
+  | { op: 'tagRegions' }
+  | { op: 'sortByName' }
+  /** 保留 name 匹配正则的节点 */
+  | { op: 'keep'; pattern: string }
+  /** 剔除 name 匹配正则的节点 */
+  | { op: 'drop'; pattern: string }
+  /** 正则重命名：name.replace(new RegExp(from,'g'), to) */
+  | { op: 'rename'; from: string; to: string }
 
 /** 规则来源：既支持内联规则，也支持远程 rule-provider 引用。 */
 export interface RuleProviderDef {
@@ -39,6 +58,8 @@ export interface RuleProviderDef {
  * 一份「转换配置档」：描述如何把订阅节点组织成一份可用配置。
  */
 export interface ConversionProfile {
+  /** 声明式节点处理（去重/过滤/重命名/打标签/排序），构建期先于分组执行 */
+  operations?: NodeOp[]
   /** 代理组 */
   groups: ProxyGroupDef[]
   /** 内联规则（原样写入 rules，如 'DOMAIN-SUFFIX,google.com,🚀 节点选择'） */

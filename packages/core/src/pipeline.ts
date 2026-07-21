@@ -4,6 +4,7 @@ import type { ProxyNode } from './model.js'
 import { parseSubscription } from './parsers/index.js'
 import { getRenderer } from './renderers/index.js'
 import { nodeToMihomo } from './renderers/mihomo.js'
+import { applyOperations, expandRegionGroups } from './preprocess.js'
 import type { ScriptRunner } from './script/runner.js'
 import { isOverrideScript } from './script/types.js'
 import { uniquifyNames } from './script/utils.js'
@@ -42,7 +43,9 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineOutput>
     parsed.push(...parseSubscription(raw))
   }
 
-  let nodes = uniquifyNames(parsed)
+  // 先执行声明式节点操作（可视化编辑器产出）
+  let nodes = input.profile.operations?.length ? applyOperations(parsed, input.profile.operations) : parsed
+  nodes = uniquifyNames(nodes)
   const logs: string[] = []
   const script = input.script?.trim()
 
@@ -69,7 +72,9 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineOutput>
 
   const renderer = getRenderer(input.target)
   if (!renderer) throw new Error(`未知的目标格式: ${input.target}`)
-  const config = renderer.render({ nodes, profile: input.profile })
+  // 展开「地区自动分组」
+  const groups = expandRegionGroups(input.profile.groups, nodes)
+  const config = renderer.render({ nodes, profile: { ...input.profile, groups } })
 
   return {
     config,

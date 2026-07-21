@@ -25,9 +25,19 @@ export interface ProxyGroupDef {
   excludeFilter?: string
   url?: string
   interval?: number
+  autoRegion?: boolean
 }
 
+export type NodeOp =
+  | { op: 'dedupe' }
+  | { op: 'tagRegions' }
+  | { op: 'sortByName' }
+  | { op: 'keep'; pattern: string }
+  | { op: 'drop'; pattern: string }
+  | { op: 'rename'; from: string; to: string }
+
 export interface ConversionProfile {
+  operations?: NodeOp[]
   groups: ProxyGroupDef[]
   rules: string[]
   ruleProviders?: unknown[]

@@ -57,7 +57,7 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
             value={value}
             onChange={handleChange}
             beforeMount={beforeMount}
-            options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastFile: false }}
+            options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false }}
           />
         </div>
         <div className="muted" style={{ marginTop: 6 }}>

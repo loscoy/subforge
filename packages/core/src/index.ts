@@ -2,6 +2,11 @@
 export * from './model.js'
 export * from './config.js'
 
+// 预设 / 模板 / 声明式处理
+export { RULE_PRESETS, COMMON_GROUPS, TEMPLATES, assembleProfile } from './presets.js'
+export type { RulePreset, Template, AssembleOptions } from './presets.js'
+export { applyOperations, expandRegionGroups } from './preprocess.js'
+
 // 解析 / 渲染 / 管线
 export { parseUri, parseSubscription } from './parsers/index.js'
 export { parseClashYaml, clashProxyToNode } from './parsers/clash.js'
