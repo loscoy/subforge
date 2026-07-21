@@ -13,7 +13,7 @@ function Markdown({ text }: { text: string }) {
 }
 
 /** 紧凑的 Agent 对话面板：流式输出 + 工具实时显示 + Markdown。对话产生写操作后回调 onChanged。 */
-export function AgentChatPanel({ threadId, context, hasAgent, onChanged, height = 320, placeholder }: {
+export function AgentChatPanel({ threadId, context, hasAgent, onChanged, height, placeholder }: {
   threadId: string
   context?: string
   hasAgent: boolean
@@ -21,7 +21,9 @@ export function AgentChatPanel({ threadId, context, hasAgent, onChanged, height 
   height?: number
   placeholder?: string
 }) {
-  const fill = height === undefined
+  // 未传 height 即填充模式（用 flex 撑满父容器）。注意不能给 height 设默认值，
+  // 否则默认参数会把显式传入的 undefined 变成默认数值，导致 fill 永远为 false。
+  const fill = height == null
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
