@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
+import { ISend } from '../icons'
 import type { AgentStep } from '../types'
 
 interface ChatItem { role: 'user' | 'assistant' | 'step'; content: string }
@@ -15,6 +16,7 @@ export function AgentChatPanel({ threadId, context, hasAgent, onChanged, height 
   height?: number
   placeholder?: string
 }) {
+  const fill = height === undefined
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -49,18 +51,18 @@ export function AgentChatPanel({ threadId, context, hasAgent, onChanged, height 
   }
 
   return (
-    <div className="chat" style={{ height }}>
+    <div className="chat" style={fill ? { height: '100%' } : { height }}>
       <div className="chat-log" ref={logRef}>
-        {items.length === 0 && <div className="muted">{placeholder || '对我说需求，例如「把香港节点单独分一组」「加一条 Netflix 分流」「把当前配置存成模板 家用」。'}</div>}
+        {items.length === 0 && <div className="muted" style={{ padding: 8 }}>{placeholder || '对我说需求，例如「把香港节点单独分一组」「加一条 Netflix 分流」「把当前配置存成模板 家用」。'}</div>}
         {items.map((it, i) => <div key={i} className={`msg ${it.role}`}>{it.content}</div>)}
         {busy && <div className="msg assistant muted">思考中…</div>}
       </div>
-      {err && <div className="error" style={{ padding: '0 8px' }}>{err}</div>}
+      {err && <div className="error" style={{ padding: '4px 8px' }}>{err}</div>}
       <div className="chat-input">
         <textarea rows={2} placeholder="描述你想做的调整…（Enter 发送）" value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send() } }} />
-        <button className="primary" onClick={send} disabled={busy}>发送</button>
+        <button className="primary icon-btn" title="发送" onClick={send} disabled={busy}><ISend size={16} /></button>
       </div>
     </div>
   )

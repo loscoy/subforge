@@ -78,7 +78,7 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
               </div>
               <div style={{ maxHeight: 220, overflow: 'auto', marginTop: 6 }}>
                 {preview.after.map((n, i) => (
-                  <span className="node-chip" key={i}>
+                  <span className="chip" key={i}>
                     {n.name}
                   </span>
                 ))}
