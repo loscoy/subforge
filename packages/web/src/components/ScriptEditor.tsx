@@ -1,4 +1,5 @@
 import Editor, { type Monaco } from '@monaco-editor/react'
+import { Badge, Box, Card, Group, SimpleGrid, Text, useMantineColorScheme } from '@mantine/core'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import type { PreviewResult } from '../types'
@@ -12,6 +13,7 @@ interface Props {
 
 /** Monaco 脚本编辑器：挂载 .d.ts 提供补全，改动后防抖对真实节点跑预览。 */
 export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
+  const { colorScheme } = useMantineColorScheme()
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [running, setRunning] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -47,47 +49,58 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
   }
 
   return (
-    <div className="row">
-      <div className="col">
+    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
+      <Box>
         <div className="editor-wrap">
           <Editor
             height="360px"
             defaultLanguage="javascript"
-            theme="vs-dark"
+            theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
             value={value}
             onChange={handleChange}
             beforeMount={beforeMount}
             options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false }}
           />
         </div>
-        <div className="muted" style={{ marginTop: 6 }}>
+        <Text c="dimmed" fz="xs" mt={6}>
           可用全局：<span className="mono">nodes</span> / <span className="mono">utils</span> /{' '}
           <span className="mono">console</span> / <span className="mono">params</span>。改动后自动预览。
-        </div>
-      </div>
-      <div className="col">
-        <div className="card" style={{ marginBottom: 8 }}>
-          <h3>
-            实时预览 {running && <span className="muted">运行中…</span>}
-          </h3>
-          {preview && !preview.ok && <div className="error">错误：{preview.error}</div>}
+        </Text>
+      </Box>
+      <Box>
+        <Card mb="xs">
+          <Group justify="space-between" mb={6}>
+            <Text fw={600} fz="sm">
+              实时预览
+            </Text>
+            {running && (
+              <Text c="dimmed" fz="xs">
+                运行中…
+              </Text>
+            )}
+          </Group>
+          {preview && !preview.ok && (
+            <Text c="red" fz="sm">
+              错误：{preview.error}
+            </Text>
+          )}
           {preview && preview.ok && (
             <>
-              <div className="muted">
+              <Text c="dimmed" fz="sm">
                 处理前 {preview.before.length} → 处理后 <b>{preview.after.length}</b> 个节点
-              </div>
-              <div style={{ maxHeight: 220, overflow: 'auto', marginTop: 6 }}>
+              </Text>
+              <Group gap={6} mt={8} style={{ maxHeight: 220, overflow: 'auto' }}>
                 {preview.after.map((n, i) => (
-                  <span className="chip" key={i}>
+                  <Badge key={i} variant="light" color="gray" tt="none" fw={500}>
                     {n.name}
-                  </span>
+                  </Badge>
                 ))}
-              </div>
+              </Group>
             </>
           )}
-        </div>
+        </Card>
         {preview && preview.logs.length > 0 && <div className="logs">{preview.logs.join('\n')}</div>}
-      </div>
-    </div>
+      </Box>
+    </SimpleGrid>
   )
 }

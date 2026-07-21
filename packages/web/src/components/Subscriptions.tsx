@@ -1,3 +1,5 @@
+import { ActionIcon, Badge, Box, Button, Card, Group, Stack, Text, Textarea, TextInput } from '@mantine/core'
+import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { fmtBytes, fmtExpire, usedBytes } from '../format'
@@ -9,61 +11,143 @@ export function Subscriptions() {
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [content, setContent] = useState('')
-  const [err, setErr] = useState('')
 
-  const load = () => api.listSubscriptions().then(setSubs).catch((e) => setErr(String(e)))
-  useEffect(() => { load() }, [])
+  const fail = (e: unknown) => notifications.show({ color: 'red', message: String(e) })
+  const load = () => api.listSubscriptions().then(setSubs).catch(fail)
+  useEffect(() => {
+    load()
+  }, [])
 
   const add = async () => {
-    setErr('')
     try {
       await api.createSubscription({ name: name || '未命名', url: url || undefined, content: content || undefined })
-      setName(''); setUrl(''); setContent(''); load()
-    } catch (e) { setErr(String(e)) }
+      setName('')
+      setUrl('')
+      setContent('')
+      notifications.show({ color: 'teal', message: '已添加订阅' })
+      load()
+    } catch (e) {
+      fail(e)
+    }
   }
 
   return (
-    <div className="row">
-      <div className="col">
+    <Group align="flex-start" gap="lg" wrap="nowrap">
+      <Box style={{ flex: 1, minWidth: 0 }}>
         {subs.length === 0 ? (
-          <div className="card"><div className="empty"><IInbox size={34} /><h4>还没有订阅</h4><div>在右侧粘贴订阅链接或节点，SubForge 会自动抓取解析。</div></div></div>
+          <Card>
+            <Stack align="center" gap={6} py={40} c="dimmed">
+              <IInbox size={34} />
+              <Text fw={600} c="var(--mantine-color-text)">
+                还没有订阅
+              </Text>
+              <Text fz="sm" ta="center">
+                在右侧粘贴订阅链接或节点，SubForge 会自动抓取解析。
+              </Text>
+            </Stack>
+          </Card>
         ) : (
-          <div className="card">
-            <div className="card-head"><h3><IRss size={15} /> 我的订阅</h3><span className="badge">{subs.length}</span></div>
-            {subs.map((s) => (
-              <div key={s.id} className="item">
-                <div style={{ minWidth: 0 }}>
-                  <div className="item-title">{s.name}</div>
-                  <div className="item-sub mono" style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 340 }}>{s.url || '手工节点'}</div>
-                  <div className="item-sub">{s.fetchedAt ? `更新于 ${new Date(s.fetchedAt).toLocaleString()}` : '未抓取'}</div>
-                  {s.userInfo && (s.userInfo.total !== undefined || s.userInfo.expire) && (
-                    <div className="hstack" style={{ marginTop: 6 }}>
-                      {s.userInfo.total !== undefined && <span className="badge">{fmtBytes(usedBytes(s.userInfo))} / {fmtBytes(s.userInfo.total)}</span>}
-                      {s.userInfo.expire && <span className="badge">到期 {fmtExpire(s.userInfo.expire)}</span>}
-                    </div>
-                  )}
-                </div>
-                <div className="hstack">
-                  {s.url && <button className="sm ghost" onClick={() => api.refreshSubscription(s.id).then(load).catch((e) => setErr(String(e)))}><IRefresh size={14} /> 刷新</button>}
-                  <button className="sm danger icon-btn" title="删除" onClick={() => api.deleteSubscription(s.id).then(load)}><ITrash size={14} /></button>
-                </div>
-              </div>
-            ))}
-          </div>
+          <Card>
+            <Group justify="space-between" mb="sm">
+              <Group gap={8}>
+                <IRss size={15} />
+                <Text fw={600}>我的订阅</Text>
+              </Group>
+              <Badge variant="light" color="gray">
+                {subs.length}
+              </Badge>
+            </Group>
+            <Stack gap={4}>
+              {subs.map((s) => (
+                <Group
+                  key={s.id}
+                  justify="space-between"
+                  wrap="nowrap"
+                  align="flex-start"
+                  py={9}
+                  px={11}
+                  style={{ borderRadius: 10, border: '1px solid var(--mantine-color-default-border)' }}
+                >
+                  <Box style={{ minWidth: 0 }}>
+                    <Text fw={550} fz={14}>
+                      {s.name}
+                    </Text>
+                    <Text className="mono" fz={12} c="dimmed" truncate maw={360}>
+                      {s.url || '手工节点'}
+                    </Text>
+                    <Text fz={12} c="dimmed">
+                      {s.fetchedAt ? `更新于 ${new Date(s.fetchedAt).toLocaleString()}` : '未抓取'}
+                    </Text>
+                    {s.userInfo && (s.userInfo.total !== undefined || s.userInfo.expire) && (
+                      <Group gap={6} mt={6}>
+                        {s.userInfo.total !== undefined && (
+                          <Badge variant="light" color="gray" tt="none" fw={500}>
+                            {fmtBytes(usedBytes(s.userInfo))} / {fmtBytes(s.userInfo.total)}
+                          </Badge>
+                        )}
+                        {s.userInfo.expire && (
+                          <Badge variant="light" color="gray" tt="none" fw={500}>
+                            到期 {fmtExpire(s.userInfo.expire)}
+                          </Badge>
+                        )}
+                      </Group>
+                    )}
+                  </Box>
+                  <Group gap={6} wrap="nowrap">
+                    {s.url && (
+                      <Button
+                        size="xs"
+                        variant="default"
+                        leftSection={<IRefresh size={14} />}
+                        onClick={() => api.refreshSubscription(s.id).then(load).catch(fail)}
+                      >
+                        刷新
+                      </Button>
+                    )}
+                    <ActionIcon
+                      size="lg"
+                      variant="subtle"
+                      color="red"
+                      onClick={() => api.deleteSubscription(s.id).then(load).catch(fail)}
+                      aria-label="删除"
+                    >
+                      <ITrash size={15} />
+                    </ActionIcon>
+                  </Group>
+                </Group>
+              ))}
+            </Stack>
+          </Card>
         )}
-      </div>
-      <div style={{ width: 360 }}>
-        <div className="card">
-          <div className="card-head"><h3><IPlus size={15} /> 新增订阅</h3></div>
-          <div className="stack">
-            <div className="field"><div className="lbl">名称</div><input placeholder="例如 机场A" value={name} onChange={(e) => setName(e.target.value)} /></div>
-            <div className="field"><div className="lbl">订阅链接</div><input placeholder="https://…（可留空）" value={url} onChange={(e) => setUrl(e.target.value)} /></div>
-            <div className="field"><div className="lbl">或粘贴节点</div><textarea placeholder="每行一个 vmess:// trojan:// … 或整段 base64 / Clash YAML" rows={5} value={content} onChange={(e) => setContent(e.target.value)} /></div>
-            <button className="primary" style={{ justifyContent: 'center' }} onClick={add}><IPlus size={15} /> 添加订阅</button>
-            {err && <div className="error">{err}</div>}
-          </div>
-        </div>
-      </div>
-    </div>
+      </Box>
+
+      <Box w={360} style={{ flexShrink: 0 }}>
+        <Card>
+          <Group gap={8} mb="sm">
+            <IPlus size={15} />
+            <Text fw={600}>新增订阅</Text>
+          </Group>
+          <Stack gap="sm">
+            <TextInput label="名称" placeholder="例如 机场A" value={name} onChange={(e) => setName(e.currentTarget.value)} />
+            <TextInput
+              label="订阅链接"
+              placeholder="https://…（可留空）"
+              value={url}
+              onChange={(e) => setUrl(e.currentTarget.value)}
+            />
+            <Textarea
+              label="或粘贴节点"
+              placeholder="每行一个 vmess:// trojan:// … 或整段 base64 / Clash YAML"
+              rows={5}
+              value={content}
+              onChange={(e) => setContent(e.currentTarget.value)}
+            />
+            <Button leftSection={<IPlus size={15} />} onClick={add}>
+              添加订阅
+            </Button>
+          </Stack>
+        </Card>
+      </Box>
+    </Group>
   )
 }
