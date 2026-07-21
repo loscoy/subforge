@@ -17,14 +17,14 @@ export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers:
   const load = () => api.listProfiles().then(setProfiles)
   useEffect(() => { load(); api.listSubscriptions().then(setSubs) }, [])
 
-  const create = async () => { const p = await api.createProfile({ name: '新转换档' }); await load(); setSel(p) }
+  const create = async () => { const p = await api.createProfile({ name: '新配置' }); await load(); setSel(p) }
 
   return (
     <div className="row">
       <div style={{ width: 220 }}>
         <div className="card">
-          <div className="card-head"><h3><ILayers size={15} /> 转换档</h3><button className="sm primary icon-btn" title="新建" onClick={create}><IPlus size={14} /></button></div>
-          {profiles.length === 0 && <div className="muted">还没有转换档，点右上「+」新建。</div>}
+          <div className="card-head"><h3><ILayers size={15} /> 配置</h3><button className="sm primary icon-btn" title="新建" onClick={create}><IPlus size={14} /></button></div>
+          {profiles.length === 0 && <div className="muted">还没有配置，点右上「+」新建。</div>}
           {profiles.map((p) => (
             <div key={p.id} className={`item click ${sel?.id === p.id ? 'active' : ''}`} onClick={() => api.getProfile(p.id).then(setSel)}>
               <span className="item-title">{p.name}</span>
@@ -35,7 +35,7 @@ export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers:
       </div>
       <div className="col">
         {!sel ? (
-          <div className="card"><div className="empty"><ILayers size={34} /><h4>选择或新建一个转换档</h4><div>转换档决定订阅怎么转成配置：套模板、勾选分流、或写脚本。</div></div></div>
+          <div className="card"><div className="empty"><ILayers size={34} /><h4>选择或新建一个配置</h4><div>配置决定订阅怎么转：套模板、勾选分流、或写脚本。</div></div></div>
         ) : (
           <ProfileDetail key={sel.id} profile={sel} subs={subs} dts={dts} renderers={renderers} hasAgent={hasAgent}
             onSaved={(p) => { setSel(p); load() }} onDeleted={() => { setSel(null); load() }} />
@@ -180,7 +180,7 @@ function ProfileDetail({ profile, subs, dts, renderers, hasAgent, onSaved, onDel
           <button className="ghost" disabled={testing} onClick={() => { setErr(''); setHealth(null); setTesting(true); api.healthcheck(profile.id).then(setHealth).catch((e) => setErr(String(e).includes('501') ? '当前部署不支持测活（边缘运行时）' : String(e))).finally(() => setTesting(false)) }}><IZap size={14} /> {testing ? '测活中…' : '测活'}</button>
           <button className={showAgent ? 'primary' : 'ghost'} onClick={() => setShowAgent((v) => !v)}><IBot size={14} /> Agent</button>
           <div className="spacer" />
-          <button className="danger icon-btn" title="删除转换档" onClick={() => api.deleteProfile(profile.id).then(onDeleted)}><ITrash size={15} /></button>
+          <button className="danger icon-btn" title="删除配置" onClick={() => api.deleteProfile(profile.id).then(onDeleted)}><ITrash size={15} /></button>
         </div>
         {msg && <div className="muted" style={{ marginTop: 8 }}>{msg}</div>}
         {err && <div className="error" style={{ marginTop: 8 }}>{err}</div>}
@@ -213,7 +213,7 @@ function ProfileDetail({ profile, subs, dts, renderers, hasAgent, onSaved, onDel
           <div className="card-head"><h3><IBot size={15} /> Agent · 对话即改当前档</h3></div>
           <div className="muted" style={{ marginBottom: 8 }}>例：「香港节点单独分组、按延迟测速」「加一条 Netflix 分流」「把当前配置存成模板，叫 家用」「套用模板 家用」。改完自动刷新。</div>
           <AgentChatPanel threadId={`profile:${profile.id}`} hasAgent={hasAgent} onChanged={reloadFromServer} height={300}
-            context={`用户正在编辑转换档：id=${profile.id}，name=「${name}」。除非明确指定其它档，所有 read/write/preview/validate/save_template/apply_template 操作都针对这个档（profileId=${profile.id}）。`} />
+            context={`用户正在编辑配置：id=${profile.id}，name=「${name}」。除非明确指定其它档，所有 read/write/preview/validate/save_template/apply_template 操作都针对这个档（profileId=${profile.id}）。`} />
         </div>
       )}
 

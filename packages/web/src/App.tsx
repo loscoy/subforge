@@ -10,7 +10,7 @@ type Tab = 'subs' | 'profiles' | 'agent'
 
 const TABS: { key: Tab; label: string; title: string; sub: string; icon: typeof IRss }[] = [
   { key: 'subs', label: '订阅', title: '订阅', sub: '添加机场订阅或手工节点，SubForge 会抓取并解析。', icon: IRss },
-  { key: 'profiles', label: '转换档', title: '转换档', sub: '把订阅按你的规则转成可用配置，用分享链接分发。', icon: ILayers },
+  { key: 'profiles', label: '配置', title: '配置', sub: '把订阅按你的规则转成可用配置，用分享链接分发。', icon: ILayers },
   { key: 'agent', label: 'Agent', title: 'Agent', sub: '用对话调整配置、写脚本、管理模板。', icon: ISparkles },
 ]
 
