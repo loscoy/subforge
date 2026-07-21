@@ -1,6 +1,6 @@
 import browserVariant from '@jitl/quickjs-singlefile-browser-release-sync'
 import { newQuickJSWASMModuleFromVariant, type QuickJSWASMModule } from 'quickjs-emscripten-core'
-import { scriptUtils, type ProxyNode, type ScriptResult, type ScriptRunner } from '@subforge/core'
+import { scriptUtils, type OverrideResult, type ProxyNode, type ScriptResult, type ScriptRunner } from '@subforge/core'
 
 /**
  * 基于 QuickJS-wasm 的脚本执行器，用于无 node:vm 的运行时（Cloudflare Workers 等）。
@@ -92,6 +92,70 @@ export class QuickJsRunner implements ScriptRunner {
       return { ok: true, nodes: out, logs, durationMs: Date.now() - start }
     } catch (err) {
       return { ok: false, nodes, logs, error: err instanceof Error ? err.message : String(err), durationMs: Date.now() - start }
+    } finally {
+      ctx.dispose()
+    }
+  }
+
+  async runOverride(
+    code: string,
+    config: Record<string, unknown>,
+    params: Record<string, string> = {},
+  ): Promise<OverrideResult> {
+    const start = Date.now()
+    const logs: string[] = []
+    const QuickJS = await this.getModule()
+    const ctx = QuickJS.newContext()
+    try {
+      const logFn = ctx.newFunction('__log', (levelH, argsH) => {
+        const level = ctx.getString(levelH)
+        const args = JSON.parse(ctx.getString(argsH)) as unknown[]
+        logs.push(`[${level}] ${args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')}`)
+      })
+      ctx.setProp(ctx.global, '__log', logFn)
+      logFn.dispose()
+
+      const setStr = (k: string, v: string) => {
+        const h = ctx.newString(v)
+        ctx.setProp(ctx.global, k, h)
+        h.dispose()
+      }
+      setStr('__configJson', JSON.stringify(config))
+      setStr('__argsJson', JSON.stringify(params))
+
+      const wrapped = `(function(){
+  var __config = JSON.parse(__configJson);
+  var $arguments = JSON.parse(__argsJson);
+  var console = {
+    log: (...a) => __log('log', JSON.stringify(a)),
+    warn: (...a) => __log('warn', JSON.stringify(a)),
+    error: (...a) => __log('error', JSON.stringify(a)),
+  };
+  ${code}
+  var __out = (typeof main === 'function') ? main(__config) : undefined;
+  return JSON.stringify(__out === undefined ? null : __out);
+})()`
+
+      const result = ctx.evalCode(wrapped)
+      if (result.error) {
+        const err = ctx.dump(result.error)
+        result.error.dispose()
+        return {
+          ok: false,
+          logs,
+          error: typeof err === 'object' && err && 'message' in err ? String((err as any).message) : String(err),
+          durationMs: Date.now() - start,
+        }
+      }
+      const json = ctx.getString(result.value)
+      result.value.dispose()
+      const cfg = JSON.parse(json)
+      if (!cfg || typeof cfg !== 'object') {
+        return { ok: false, logs, error: 'main(config) 未返回配置对象', durationMs: Date.now() - start }
+      }
+      return { ok: true, config: cfg as Record<string, unknown>, logs, durationMs: Date.now() - start }
+    } catch (err) {
+      return { ok: false, logs, error: err instanceof Error ? err.message : String(err), durationMs: Date.now() - start }
     } finally {
       ctx.dispose()
     }

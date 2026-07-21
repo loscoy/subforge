@@ -1,4 +1,6 @@
 import {
+  isOverrideScript,
+  nodeToMihomo,
   parseSubscription,
   runPipeline,
   type PipelineOutput,
@@ -104,6 +106,19 @@ export async function previewScript(
   for (const raw of raws) before.push(...parseSubscription(raw))
 
   if (!script.trim()) return { ok: true, before, after: before, logs: [] }
+
+  // override 覆写脚本：跑 main(config)，节点列表不变，仅回报成功/日志/错误
+  if (isOverrideScript(script)) {
+    const r = await runner.runOverride(script, { proxies: before.map(nodeToMihomo) })
+    const groups = r.ok && r.config && Array.isArray(r.config['proxy-groups']) ? (r.config['proxy-groups'] as unknown[]).length : 0
+    return {
+      ok: r.ok,
+      before,
+      after: before,
+      logs: [...(r.logs || []), r.ok ? `[override] 生成 ${groups} 个代理组` : ''].filter(Boolean),
+      error: r.error,
+    }
+  }
 
   const result = await runner.run(script, before)
   return {

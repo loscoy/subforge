@@ -1,8 +1,11 @@
+import yaml from 'js-yaml'
 import type { ConversionProfile } from './config.js'
 import type { ProxyNode } from './model.js'
 import { parseSubscription } from './parsers/index.js'
 import { getRenderer } from './renderers/index.js'
+import { nodeToMihomo } from './renderers/mihomo.js'
 import type { ScriptRunner } from './script/runner.js'
+import { isOverrideScript } from './script/types.js'
 import { uniquifyNames } from './script/utils.js'
 
 export interface PipelineInput {
@@ -39,19 +42,30 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineOutput>
     parsed.push(...parseSubscription(raw))
   }
 
-  let nodes = parsed
+  let nodes = uniquifyNames(parsed)
   const logs: string[] = []
+  const script = input.script?.trim()
 
-  if (input.script && input.script.trim()) {
+  // ---- override（覆写）脚本：main(config) 返回完整配置，直接序列化 ----
+  if (script && isOverrideScript(script)) {
     if (!input.runner) throw new Error('提供了 script 但未注入 ScriptRunner')
-    const result = await input.runner.run(input.script, nodes, input.scriptParams)
+    const clashProxies = nodes.map(nodeToMihomo)
+    const result = await input.runner.runOverride(script, { proxies: clashProxies }, input.scriptParams)
     logs.push(...result.logs)
-    if (!result.ok) throw new Error(`脚本执行失败: ${result.error}`)
-    nodes = result.nodes
+    if (!result.ok) throw new Error(`覆写脚本执行失败: ${result.error}`)
+    if (!result.config || typeof result.config !== 'object') throw new Error('覆写脚本 main(config) 未返回配置对象')
+    const config = yaml.dump(result.config, { lineWidth: -1, noRefs: true, sortKeys: false })
+    return { config, nodes, logs, stats: { parsed: parsed.length, afterScript: nodes.length } }
   }
 
-  // 渲染前保证名称唯一，否则客户端会因重名报错
-  nodes = uniquifyNames(nodes)
+  // ---- transform（节点变换）脚本：return nodes ----
+  if (script) {
+    if (!input.runner) throw new Error('提供了 script 但未注入 ScriptRunner')
+    const result = await input.runner.run(script, nodes, input.scriptParams)
+    logs.push(...result.logs)
+    if (!result.ok) throw new Error(`脚本执行失败: ${result.error}`)
+    nodes = uniquifyNames(result.nodes)
+  }
 
   const renderer = getRenderer(input.target)
   if (!renderer) throw new Error(`未知的目标格式: ${input.target}`)

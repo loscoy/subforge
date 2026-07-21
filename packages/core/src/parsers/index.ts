@@ -1,4 +1,5 @@
 import { makeNode, type Network, type ProxyNode, type Transport, type TlsOptions } from '../model.js'
+import { parseClashYaml } from './clash.js'
 import { b64decode, decodeName, looksLikeBase64, parseAlpn, truthy } from './util.js'
 
 /**
@@ -48,6 +49,10 @@ export function parseSubscription(raw: string): ProxyNode[] {
   for (const line of lines) {
     const node = parseUri(line)
     if (node) nodes.push(node)
+  }
+  // 没有 URI 节点时，尝试按 Clash/Mihomo YAML 订阅解析（机场常见 ?clash 返回此格式）
+  if (nodes.length === 0 && /(^|\n)proxies\s*:/.test(text)) {
+    return parseClashYaml(text)
   }
   return nodes
 }

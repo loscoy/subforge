@@ -30,3 +30,26 @@ export interface ScriptResult {
   /** 执行耗时 ms */
   durationMs: number
 }
+
+/**
+ * override（覆写）脚本执行结果。
+ * 覆写脚本（Sub-Store/mihomo 风格）定义 `main(config)`，接收完整 Clash 配置、返回完整 Clash 配置。
+ */
+export interface OverrideResult {
+  ok: boolean
+  /** main(config) 返回的完整配置对象 */
+  config?: Record<string, unknown>
+  logs: string[]
+  error?: string
+  durationMs: number
+}
+
+/**
+ * 判断是否为 override 覆写脚本：脚本内定义了 `main` 函数（Sub-Store/mihomo 约定）。
+ */
+export function isOverrideScript(code: string): boolean {
+  return (
+    /\bfunction\s+main\s*\(/.test(code) ||
+    /\b(?:const|let|var)\s+main\s*=\s*(?:async\s*)?(?:function|\()/.test(code)
+  )
+}

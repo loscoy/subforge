@@ -1,5 +1,5 @@
 import vm from 'node:vm'
-import { scriptUtils, type ProxyNode, type ScriptResult, type ScriptRunner } from '@subforge/core'
+import { scriptUtils, type OverrideResult, type ProxyNode, type ScriptResult, type ScriptRunner } from '@subforge/core'
 
 const DEFAULT_TIMEOUT_MS = 3000
 
@@ -73,6 +73,38 @@ export class NodeVmRunner implements ScriptRunner {
         error: err instanceof Error ? err.message : String(err),
         durationMs: performance.now() - start,
       }
+    }
+  }
+
+  async runOverride(
+    code: string,
+    config: Record<string, unknown>,
+    params: Record<string, string> = {},
+  ): Promise<OverrideResult> {
+    const start = performance.now()
+    const logs: string[] = []
+    const capture =
+      (level: string) =>
+      (...args: unknown[]) => {
+        logs.push(`[${level}] ${args.map(fmt).join(' ')}`)
+      }
+    const context = vm.createContext({
+      $arguments: params,
+      __config: structuredClone(config),
+      console: { log: capture('log'), warn: capture('warn'), error: capture('error') },
+      structuredClone,
+      JSON, Math, Object, Array, String, Number, Boolean, RegExp, Date, Map, Set,
+    })
+    try {
+      const wrapped = `(function(){\n${code}\n;\nreturn (typeof main === 'function') ? main(__config) : undefined;\n})()`
+      const script = new vm.Script(wrapped, { filename: 'override-script.js' })
+      const returned = script.runInContext(context, { timeout: this.timeoutMs * 2 })
+      if (!returned || typeof returned !== 'object') {
+        return { ok: false, logs, error: 'main(config) 未返回配置对象', durationMs: performance.now() - start }
+      }
+      return { ok: true, config: structuredClone(returned) as Record<string, unknown>, logs, durationMs: performance.now() - start }
+    } catch (err) {
+      return { ok: false, logs, error: err instanceof Error ? err.message : String(err), durationMs: performance.now() - start }
     }
   }
 }

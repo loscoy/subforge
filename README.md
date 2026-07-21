@@ -13,7 +13,7 @@
 
 ## 功能
 
-- **订阅转换**：解析 `vmess / vless / trojan / ss / hysteria2 / tuic`（URI 或整段 base64），输出 **Mihomo/Clash、sing-box、Surge**（渲染器插件化，`?target=` 切换）。
+- **订阅转换**：解析 `vmess / vless / trojan / ss / hysteria2 / tuic`（URI、整段 base64、**或 Clash/Mihomo YAML** 订阅），输出 **Mihomo/Clash、sing-box、Surge**（渲染器插件化，`?target=` 切换）。
 - **自定义组**：`select / url-test / fallback / load-balance`，成员支持 `includeAll`、正则 `filter` / `excludeFilter`、显式 `proxies`。
 - **自定义规则 / 规则集**：内联 rules + 远程 rule-providers。
 - **转换脚本**：在受限沙箱里跑 JS，内置 `utils`（去重 / 正则保留剔除 / 地区打标签 / 唯一命名等）。
@@ -88,17 +88,29 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 }
 ```
 
-## 转换脚本示例
+## 转换脚本（两种模式，自动识别）
+
+**1. transform（节点变换）** — 只处理节点列表，分组/规则在转换档配置里设：
 
 ```js
-// 按地区打标签、去重、剔除无用节点
+// 可用全局：nodes、utils、console、params（编辑器内有补全）
 let ns = utils.tagRegions(nodes)
 ns = utils.dedupe(ns)
 ns = utils.drop(ns, /过期|剩余|官网/)
 return ns
 ```
 
-可用全局：`nodes`、`utils`、`console`、`params`（编辑器内有完整补全）。
+**2. override（覆写）** — 兼容 Sub-Store/mihomo 生态脚本：脚本定义 `main(config)`，接收完整 Clash 配置、返回完整配置（自行生成 proxy-groups / rules / dns 等）。**脚本里出现 `function main(` 即自动按 override 执行**，此时转换档里的分组/规则被忽略、以脚本产出为准。
+
+```js
+function main(config) {
+  const proxies = config.proxies || []
+  // ...按需生成分组与规则...
+  return { proxies, 'proxy-groups': [...], rules: [...] }
+}
+```
+
+> override 模式在边缘（QuickJS）仅支持同步脚本；`$arguments` 对应转换档参数。像 [powerfullz/override-rules](https://github.com/powerfullz/override-rules) 这类脚本可直接使用。
 
 ## License
 
