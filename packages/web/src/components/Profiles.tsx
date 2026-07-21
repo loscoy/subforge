@@ -94,6 +94,9 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
   const [script, setScript] = useState(profile.script || '')
   const [showScript, setShowScript] = useState(!!profile.script)
   const [msg, setMsg] = useState(''); const [err, setErr] = useState('')
+  const [versions, setVersions] = useState<{ id: string; note?: string; createdAt: number }[]>([])
+  const [health, setHealth] = useState<{ alive: number; total: number; results: { name: string; latency: number | null }[] } | null>(null)
+  const [testing, setTesting] = useState(false)
 
   const isOverride = /\bfunction\s+main\s*\(/.test(script)
   const scriptActive = !!script.trim()
@@ -189,11 +192,40 @@ function ProfileDetail({ profile, subs, dts, renderers, onSaved, onDeleted }: {
             {TEMPLATES.map((t) => <option key={t.key} value={t.key}>{t.label} — {t.description}</option>)}
           </select>
           <button onClick={() => api.output(profile.id).then((o) => alert(o.ok ? o.config?.slice(0, 6000) : o.error))}>查看输出</button>
+          <button onClick={() => { setErr(''); api.versions(profile.id).then(setVersions).catch((e) => setErr(String(e))) }}>版本历史</button>
+          <button disabled={testing} onClick={() => {
+            setErr(''); setHealth(null); setTesting(true)
+            api.healthcheck(profile.id).then(setHealth).catch((e) => setErr(String(e).includes('501') ? '当前部署不支持测活（边缘运行时）；请用 Node/Docker 部署' : String(e))).finally(() => setTesting(false))
+          }}>{testing ? '测活中…' : '测活'}</button>
           <div className="spacer" />
           <button className="danger" onClick={() => api.deleteProfile(profile.id).then(onDeleted)}>删除</button>
         </div>
         {msg && <div className="muted" style={{ marginTop: 6 }}>{msg}</div>}
         {err && <div className="error" style={{ marginTop: 6 }}>{err}</div>}
+
+        {versions.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div className="muted">版本历史（点回滚恢复到该快照）</div>
+            {versions.map((v) => (
+              <div key={v.id} className="list-item">
+                <span className="muted">{new Date(v.createdAt).toLocaleString()} — {v.note || '快照'}</span>
+                <button onClick={() => api.rollback(profile.id, v.id).then((p) => { setVersions([]); onSaved(p) }).catch((e) => setErr(String(e)))}>回滚</button>
+              </div>
+            ))}
+          </div>
+        )}
+        {health && (
+          <div style={{ marginTop: 10 }}>
+            <div className="muted">存活 <b>{health.alive}</b> / {health.total}（按延迟排序）</div>
+            <div style={{ maxHeight: 160, overflow: 'auto', marginTop: 4 }}>
+              {health.results.slice().sort((a, b) => (a.latency ?? 99999) - (b.latency ?? 99999)).map((r, i) => (
+                <span className="node-chip" key={i} style={{ color: r.latency === null ? 'var(--danger)' : undefined }}>
+                  {r.name} · {r.latency === null ? '超时' : `${r.latency}ms`}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {scriptActive && isOverride && (
