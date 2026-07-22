@@ -2,7 +2,7 @@
   "name": "subforge",
   "version": "0.1.0",
   "private": true,
-  "description": "自托管、可编程、Agent 友好的代理订阅转换/管理工具",
+  "description": "自托管的代理订阅转换 / 管理工具",
   "license": "MIT",
   "type": "module",
   "workspaces": [
