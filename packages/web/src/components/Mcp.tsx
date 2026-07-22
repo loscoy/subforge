@@ -131,15 +131,15 @@ export function Mcp({ meta }: { meta: Meta['mcp'] }) {
         </Stack>
       </Box>
 
-      {/* 右：可用工具 */}
-      <Box>
+      {/* 右：可用工具（滚动区，不撑开卡片） */}
+      <Box className="mcp-tools">
         <Group justify="space-between" px={20} py={16} className="mcp-pane-head">
           <Text fw={600}>可用工具</Text>
           <Badge color="gray" variant="light">
             {meta.tools.length}
           </Badge>
         </Group>
-        <Box px={20} pt={4} pb={16}>
+        <Box px={20} pt={4} pb={16} className="mcp-tools-scroll">
           {meta.tools.map((tool) => (
             <Box key={tool.name} py={9}>
               <Text className="mono" fz={12.5} fw={600}>

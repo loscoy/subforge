@@ -310,6 +310,18 @@ body {
 .mcp-pane-head {
   border-bottom: 1px solid var(--sf-border-subtle);
 }
+/* 工具列表随左栏高度滚动，不把卡片撑高 */
+.mcp-tools {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.mcp-tools-scroll {
+  flex: 1 1 0;
+  height: 0;
+  min-height: 0;
+  overflow-y: auto;
+}
 .mcp-copy-field {
   position: relative;
   display: grid;
