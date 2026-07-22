@@ -37,6 +37,8 @@ body {
   background: var(--sf-app-background);
   letter-spacing: 0;
   line-height: 1.5;
+  /* 兜底：任何内部溢出都不允许把整页撑出横向滚动 */
+  overflow-x: clip;
 }
 :where(a, button, input, textarea, select, [tabindex]):focus-visible {
   outline: 2px solid var(--sf-focus-ring);
@@ -89,15 +91,19 @@ body {
 }
 .topbar-brand {
   padding-right: 18px;
+  flex-shrink: 0;
 }
 .topbar-nav {
   display: flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 .topbar-tab {
   height: 34px;
   padding: 0 16px;
+  white-space: nowrap;
+  flex-shrink: 0;
   border-radius: 7px;
   font-size: 13.5px;
   font-weight: 600;
@@ -448,9 +454,31 @@ body {
   .subs-table-head {
     display: none;
   }
+  /* 窄屏改为卡片式三行：名称+操作 / 来源 / 用量+时间 */
   .subs-table-row {
     grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 4px;
+    row-gap: 6px;
+  }
+  .subs-table-row > :nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+  }
+  .subs-table-row > :nth-child(5) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .subs-table-row > :nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  .subs-table-row > :nth-child(3) {
+    grid-column: 1;
+    grid-row: 3;
+  }
+  .subs-table-row > :nth-child(4) {
+    grid-column: 2;
+    grid-row: 3;
+    justify-self: end;
   }
   .mcp-card {
     grid-template-columns: minmax(0, 1fr);
@@ -465,11 +493,23 @@ body {
     min-width: 44px;
     min-height: 44px;
   }
+  /* 代码块内的悬浮复制按钮保持小尺寸，避免溢出单行代码块 */
+  .mcp-code-copy .mantine-ActionIcon-root {
+    min-width: 36px;
+    min-height: 36px;
+  }
   .form-grid-2,
   .proxy-group-main,
-  .profile-head-grid,
   .profiles-card {
     grid-template-columns: minmax(0, 1fr);
+  }
+  /* 名称 / 输出格式各占整行，分享链接与「更多」按钮同行 */
+  .profile-head-grid {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+  .profile-head-grid > :nth-child(1),
+  .profile-head-grid > :nth-child(2) {
+    grid-column: 1 / -1;
   }
   .profiles-list {
     border-right: none;
@@ -477,6 +517,21 @@ body {
   }
   .topbar {
     overflow-x: auto;
+    padding: 0 12px;
+    gap: 2px;
+  }
+  .topbar-brand {
+    padding-right: 10px;
+  }
+  /* 小屏只留 logo 标，给导航和 Agent 按钮腾位置 */
+  .topbar-brand .brand-name {
+    display: none;
+  }
+  .topbar-tab {
+    padding: 0 10px;
+  }
+  .topbar .mantine-Button-root {
+    padding-inline: 12px;
   }
   .topbar-status {
     display: none;
@@ -486,17 +541,28 @@ body {
   }
   .save-bar {
     padding: 10px 16px;
+    row-gap: 8px;
   }
   .agent-drawer {
     position: fixed;
     right: 0;
     top: 54px;
-    width: min(340px, 100vw);
+    /* 手机上占满全宽，平板保持抽屉宽度 */
+    width: min(400px, 100dvw);
     z-index: 50;
     box-shadow: var(--mantine-shadow-md);
   }
   .section-tabs {
     overflow-x: auto;
+  }
+  /* 移动端横向滑动区不显示滚动条 */
+  .topbar,
+  .section-tabs {
+    scrollbar-width: none;
+  }
+  .topbar::-webkit-scrollbar,
+  .section-tabs::-webkit-scrollbar {
+    display: none;
   }
   .proxy-group-checkbox,
   .proxy-group-delete {

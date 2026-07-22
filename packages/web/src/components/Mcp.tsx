@@ -120,7 +120,7 @@ export function Mcp({ meta }: { meta: Meta['mcp'] }) {
               >
                 {selectedExample.value}
               </Code>
-              <Box pos="absolute" top={9} right={9}>
+              <Box pos="absolute" top={9} right={9} className="mcp-code-copy">
                 <CopyAction value={selectedExample.value} label={selectedExample.copyLabel} />
               </Box>
             </Box>

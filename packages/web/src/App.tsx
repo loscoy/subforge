@@ -60,7 +60,7 @@ function Brand() {
       >
         <IBrand size={15} />
       </Box>
-      <Text fw={600} fz={15} style={{ whiteSpace: 'nowrap' }}>
+      <Text fw={600} fz={15} className="brand-name" style={{ whiteSpace: 'nowrap' }}>
         Sub
         <Text span c="dimmed" fw={500}>
           Forge

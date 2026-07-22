@@ -566,7 +566,7 @@ function ProfileDetail({
           正在同步 Agent 的改动…
         </Text>
       )}
-      <Group gap={8} ml="auto" wrap="nowrap">
+      <Group gap={8} ml="auto" wrap="wrap" justify="flex-end">
         <NativeSelect
           size="xs"
           radius={7}
