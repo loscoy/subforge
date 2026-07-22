@@ -26,14 +26,17 @@ export const theme = createTheme({
   defaultRadius: 'sm',
   radius: { xs: '4px', sm: '6px', md: '8px', lg: '8px', xl: '8px' },
   shadows: {
-    xs: '0 1px 2px rgba(16,17,20,.04)',
+    xs: '0 1px 2px rgba(16,17,20,.05), 0 4px 12px rgba(16,17,20,.04)',
     sm: '0 2px 8px rgba(16,17,20,.06)',
     md: '0 8px 28px rgba(16,17,20,.10)',
   },
   headings: { fontWeight: '600' },
   cursorType: 'pointer',
   components: {
-    Card: Card.extend({ defaultProps: { radius: 'md', withBorder: true, padding: 'md' } }),
+    Card: Card.extend({
+      defaultProps: { radius: 'md', withBorder: false, padding: 'md', shadow: 'xs' },
+      styles: { root: { background: 'var(--sf-surface)' } },
+    }),
     Button: Button.extend({ defaultProps: { radius: 'sm' } }),
     TextInput: TextInput.extend({ defaultProps: { size: 'sm', radius: 'sm' } }),
     Textarea: Textarea.extend({ defaultProps: { size: 'sm', radius: 'sm' } }),

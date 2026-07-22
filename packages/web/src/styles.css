@@ -55,14 +55,14 @@ body {
   padding: 13px 2px;
 }
 .async-skeleton-row + .async-skeleton-row {
-  border-top: 1px solid var(--sf-border-subtle);
+  margin-top: 2px;
 }
 .async-detail-skeleton,
 .async-error {
   padding: 16px;
-  border: 1px solid var(--sf-border-subtle);
   border-radius: 8px;
   background: var(--sf-surface);
+  box-shadow: var(--mantine-shadow-xs);
 }
 .async-message-skeleton {
   padding: 8px 2px;
@@ -81,9 +81,8 @@ body {
   gap: 16px;
   align-items: start;
   padding: 11px 12px;
-  border: 1px solid var(--sf-border-subtle);
   border-radius: 8px;
-  background: var(--sf-surface);
+  background: var(--sf-surface-subtle);
 }
 .profiles-layout {
   display: grid;
@@ -127,7 +126,6 @@ body {
 }
 .proxy-group-editor {
   padding: 12px;
-  border: 1px solid var(--sf-border-subtle);
   border-radius: 8px;
   background: var(--sf-surface-subtle);
 }
@@ -177,7 +175,7 @@ body {
   padding: 12px 2px;
 }
 .mcp-tool-row + .mcp-tool-row {
-  border-top: 1px solid var(--sf-border-subtle);
+  margin-top: 2px;
 }
 
 /* ---------- Agent 聊天 ---------- */
@@ -317,13 +315,12 @@ body {
 /* ---------- Monaco 包裹 & 预览日志 ---------- */
 .editor-wrap {
   border: 1px solid var(--mantine-color-default-border);
-  border-radius: 12px;
+  border-radius: 8px;
   overflow: hidden;
 }
 .script-preview {
   min-height: 112px;
   padding: 14px;
-  border: 1px solid var(--sf-border-subtle);
   border-radius: 8px;
   background: var(--sf-surface-subtle);
 }
