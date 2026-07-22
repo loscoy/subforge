@@ -19,7 +19,7 @@
 - **节点测活 / 延迟**：TCP 连接测速，按延迟排序、标记失效（也作为 `test_nodes` agent 工具）。
 - **版本历史 / 回滚**：脚本与配置每次改动自动快照。
 - **Token 分享**：每个转换档一个短链 `/sub/:token`，转换好的订阅直接分享给别人用，无需账号。
-- **AI Agent**：兼容 OpenAI 接口，带**跨会话记忆**；同一套工具还暴露为 **MCP server**，可用 Claude Code 等直接驱动。
+- **AI Agent**：兼容 OpenAI 接口，带**跨会话记忆**；同一套工具还通过带独立 Bearer token 的远端 **MCP server** 暴露，可用 Claude Code、Codex 等直接驱动。
 
 ## 架构
 
@@ -73,7 +73,7 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 
 > 安全说明：管理接口默认**失败关闭**——既未设 `ADMIN_TOKEN` 也未设 `SUBFORGE_ALLOW_NO_AUTH=1` 时，`/api/*` 一律返回 503（分享出口 `/sub/:token` 不受影响，仍公开）。远端 MCP 使用独立的 `MCP_TOKEN`，不受无鉴权模式影响。抓取订阅 URL 时会做 SSRF 防护，拒绝 `localhost`/内网/`169.254.169.254`(云元数据) 等地址。
 
-## 用 Claude Code 等驱动（MCP）
+## 用 Claude Code / Codex 驱动（MCP）
 
 同一套工具同时支持远端 Streamable HTTP 与本地 stdio。工具具有修改脚本、配置与版本的管理权限，请把 MCP token 视同管理员凭据。
 
@@ -85,6 +85,24 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 claude mcp add --transport http subforge "https://subforge.example.com/mcp" \
   --header "Authorization: Bearer <MCP_TOKEN>"
 ```
+
+Codex 推荐从环境变量读取 token，避免把凭据直接写入 Codex 配置文件：
+
+```bash
+export SUBFORGE_MCP_TOKEN="<MCP_TOKEN>"
+codex mcp add subforge --url "https://subforge.example.com/mcp" \
+  --bearer-token-env-var SUBFORGE_MCP_TOKEN
+```
+
+也可以直接编辑 `~/.codex/config.toml`（受信任项目可改用 `.codex/config.toml`）：
+
+```toml
+[mcp_servers.subforge]
+url = "https://subforge.example.com/mcp"
+bearer_token_env_var = "SUBFORGE_MCP_TOKEN"
+```
+
+同一台主机上的 ChatGPT 桌面应用、Codex CLI 与 IDE 扩展共享这份 Codex MCP 配置。
 
 通用 HTTP 客户端配置：
 
@@ -100,7 +118,7 @@ claude mcp add --transport http subforge "https://subforge.example.com/mcp" \
 }
 ```
 
-管理界面的“MCP”页面会按当前域名生成配置，并列出当前运行时可用的工具。固定 Bearer token 适用于支持自定义 HTTP header 的客户端；只接受 OAuth 的托管客户端暂不支持。
+管理界面的“MCP”页面会按当前域名生成实际端点，并提供 Claude Code、Codex 与通用 JSON 配置，同时列出当前运行时可用的工具。固定 Bearer token 适用于支持自定义 HTTP header 的客户端；只接受 OAuth 的托管客户端暂不支持。`MCP_TOKEN` 与 `SUBFORGE_MCP_TOKEN` 都不要提交进仓库。
 
 ### 本地 stdio
 
