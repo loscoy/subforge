@@ -13,14 +13,16 @@ import {
   Modal,
   NativeSelect,
   ScrollArea,
+  Skeleton,
   Stack,
   Text,
   Textarea,
   TextInput,
+  UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { useEffect, useState, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api'
 import {
   IBot, ICode, IFilter, IGlobe, IHistory, ILayers, ILink, IPlay, IPlus, ISave, ISliders, ITemplate, ITrash, IZap,
@@ -28,6 +30,7 @@ import {
 import { builtinTemplates, serverToUI, type UITemplate } from '../templates'
 import type { ConversionProfile, NodeOp, Profile, ProxyGroupDef, Subscription } from '../types'
 import { AgentChatPanel } from './AgentChatPanel'
+import { DetailSkeleton, ListSkeleton, LoadError } from './AsyncState'
 import { ScriptEditor } from './ScriptEditor'
 
 const ok = (message: string) => notifications.show({ color: 'teal', message })
@@ -39,7 +42,7 @@ function StepNum({ n }: { n: number }) {
       style={{
         width: 21,
         height: 21,
-        borderRadius: 7,
+        borderRadius: 6,
         background: 'var(--mantine-color-violet-light)',
         color: 'var(--mantine-color-violet-6)',
         fontSize: 11.5,
@@ -74,22 +77,78 @@ export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers:
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [subs, setSubs] = useState<Subscription[]>([])
   const [sel, setSel] = useState<Profile | null>(null)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [profilesLoading, setProfilesLoading] = useState(true)
+  const [profilesError, setProfilesError] = useState('')
+  const [subsLoading, setSubsLoading] = useState(true)
+  const [subsError, setSubsError] = useState('')
+  const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
+  const [creating, setCreating] = useState(false)
+  const detailRequest = useRef(0)
 
-  const load = () => api.listProfiles().then(setProfiles)
+  const loadProfiles = async (initial = false) => {
+    if (initial) setProfilesLoading(true)
+    try {
+      setProfiles(await api.listProfiles())
+      setProfilesError('')
+    } catch (e) {
+      if (initial) setProfilesError(String(e))
+      else fail(e)
+    } finally {
+      if (initial) setProfilesLoading(false)
+    }
+  }
+  const loadSubs = async () => {
+    setSubsLoading(true)
+    try {
+      setSubs(await api.listSubscriptions())
+      setSubsError('')
+    } catch (e) {
+      setSubsError(String(e))
+    } finally {
+      setSubsLoading(false)
+    }
+  }
   useEffect(() => {
-    load()
-    api.listSubscriptions().then(setSubs)
+    void loadProfiles(true)
+    void loadSubs()
   }, [])
 
   const create = async () => {
-    const p = await api.createProfile({ name: '新配置' })
-    await load()
-    setSel(p)
+    if (creating) return
+    setCreating(true)
+    try {
+      const p = await api.createProfile({ name: '新配置' })
+      await loadProfiles()
+      detailRequest.current += 1
+      setSelectedId(p.id)
+      setSel(p)
+    } catch (e) {
+      fail(e)
+    } finally {
+      setCreating(false)
+    }
+  }
+
+  const selectProfile = async (profileId: string) => {
+    const requestId = ++detailRequest.current
+    setSelectedId(profileId)
+    setDetailLoading(true)
+    setDetailError('')
+    try {
+      const profile = await api.getProfile(profileId)
+      if (requestId === detailRequest.current) setSel(profile)
+    } catch (e) {
+      if (requestId === detailRequest.current) setDetailError(String(e))
+    } finally {
+      if (requestId === detailRequest.current) setDetailLoading(false)
+    }
   }
 
   return (
-    <Group align="flex-start" gap="lg" wrap="nowrap">
-      <Box w={212} style={{ flexShrink: 0 }}>
+    <Box className="profiles-layout">
+      <Box style={{ minWidth: 0 }}>
         <Card padding={8}>
           <Group justify="space-between" mb={6} px={6} pt={4}>
             <Group gap={8}>
@@ -98,47 +157,50 @@ export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers:
                 配置
               </Text>
             </Group>
-            <ActionIcon size="sm" onClick={create} aria-label="新建">
+            <ActionIcon size={32} loading={creating} onClick={() => void create()} aria-label="新建配置">
               <IPlus size={14} />
             </ActionIcon>
           </Group>
-          {profiles.length === 0 && (
+          {profilesLoading ? (
+            <ListSkeleton rows={4} />
+          ) : profilesError ? (
+            <LoadError message={profilesError} onRetry={() => void loadProfiles(true)} />
+          ) : profiles.length === 0 ? (
             <Text c="dimmed" fz="sm" px={6} py={4}>
               还没有配置，点右上「+」新建。
             </Text>
+          ) : (
+            <Stack gap={2}>
+              {profiles.map((p) => {
+                const on = selectedId === p.id
+                return (
+                  <UnstyledButton
+                    key={p.id}
+                    className="profile-row"
+                    data-active={on || undefined}
+                    aria-pressed={on}
+                    onClick={() => void selectProfile(p.id)}
+                  >
+                    <Text fz={13.5} fw={on ? 600 : 400} c={on ? 'violet' : undefined} truncate>
+                      {p.name}
+                    </Text>
+                    <Badge variant="light" color="gray" size="sm" tt="none" fw={500}>
+                      {p.target}
+                    </Badge>
+                  </UnstyledButton>
+                )
+              })}
+            </Stack>
           )}
-          <Stack gap={2}>
-            {profiles.map((p) => {
-              const on = sel?.id === p.id
-              return (
-                <Group
-                  key={p.id}
-                  justify="space-between"
-                  wrap="nowrap"
-                  px={11}
-                  py={9}
-                  onClick={() => api.getProfile(p.id).then(setSel)}
-                  style={{
-                    borderRadius: 9,
-                    cursor: 'pointer',
-                    background: on ? 'var(--mantine-color-violet-light)' : undefined,
-                  }}
-                >
-                  <Text fz={13.5} fw={on ? 600 : 400} c={on ? 'violet' : undefined} truncate>
-                    {p.name}
-                  </Text>
-                  <Badge variant="light" color="gray" size="sm" tt="none" fw={500}>
-                    {p.target}
-                  </Badge>
-                </Group>
-              )
-            })}
-          </Stack>
         </Card>
       </Box>
 
       <Box style={{ flex: 1, minWidth: 0 }}>
-        {!sel ? (
+        {detailLoading ? (
+          <DetailSkeleton />
+        ) : detailError ? (
+          <LoadError message={detailError} onRetry={() => selectedId && void selectProfile(selectedId)} />
+        ) : !sel ? (
           <Card>
             <Stack align="center" gap={8} py={44} c="dimmed">
               <ILayers size={34} />
@@ -155,21 +217,27 @@ export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers:
             key={sel.id}
             profile={sel}
             subs={subs}
+            subsLoading={subsLoading}
+            subsError={subsError}
+            onRetrySubs={() => void loadSubs()}
             dts={dts}
             renderers={renderers}
             hasAgent={hasAgent}
             onSaved={(p) => {
               setSel(p)
-              load()
+              setSelectedId(p.id)
+              void loadProfiles()
             }}
             onDeleted={() => {
+              detailRequest.current += 1
               setSel(null)
-              load()
+              setSelectedId(null)
+              void loadProfiles()
             }}
           />
         )}
       </Box>
-    </Group>
+    </Box>
   )
 }
 
@@ -211,6 +279,9 @@ function buildOps(f: OpForm): NodeOp[] {
 function ProfileDetail({
   profile,
   subs,
+  subsLoading,
+  subsError,
+  onRetrySubs,
   dts,
   renderers,
   hasAgent,
@@ -219,6 +290,9 @@ function ProfileDetail({
 }: {
   profile: Profile
   subs: Subscription[]
+  subsLoading: boolean
+  subsError: string
+  onRetrySubs: () => void
   dts: string
   renderers: string[]
   hasAgent: boolean
@@ -240,6 +314,17 @@ function ProfileDetail({
   const [showAgent, setShowAgent] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
   const [outputOpen, outputCtl] = useDisclosure(false)
+  const [saving, setSaving] = useState(false)
+  const [outputLoading, setOutputLoading] = useState(false)
+  const [versionsLoading, setVersionsLoading] = useState(false)
+  const [rollbackId, setRollbackId] = useState<string | null>(null)
+  const [deleting, setDeleting] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [templateName, setTemplateName] = useState(`${profile.name} 模板`)
+  const [templateOpen, setTemplateOpen] = useState(false)
+  const [templateSaving, setTemplateSaving] = useState(false)
+  const [pendingTemplate, setPendingTemplate] = useState<UITemplate | null>(null)
+  const [agentReloading, setAgentReloading] = useState(false)
 
   const isOverride = /\bfunction\s+main\s*\(/.test(script)
   const scriptActive = !!script.trim()
@@ -258,20 +343,30 @@ function ProfileDetail({
   }, [])
 
   const reloadFromServer = async () => {
-    const p = await api.getProfile(profile.id)
-    setName(p.name)
-    setTarget(p.target)
-    setSubIds(p.subscriptionIds)
-    setOpForm(parseOps(p.profile.operations))
-    setGroups(p.profile.groups || [])
-    setRules(p.profile.rules || [])
-    setScript(p.script || '')
-    setShowScript(!!p.script)
-    onSaved(p)
-    ok('已根据 Agent 的改动刷新')
+    if (agentReloading) return
+    setAgentReloading(true)
+    try {
+      const p = await api.getProfile(profile.id)
+      setName(p.name)
+      setTarget(p.target)
+      setSubIds(p.subscriptionIds)
+      setOpForm(parseOps(p.profile.operations))
+      setGroups(p.profile.groups || [])
+      setRules(p.profile.rules || [])
+      setScript(p.script || '')
+      setShowScript(!!p.script)
+      onSaved(p)
+      ok('已根据 Agent 的改动刷新')
+    } catch (e) {
+      fail(e)
+    } finally {
+      setAgentReloading(false)
+    }
   }
 
   const save = async () => {
+    if (saving) return
+    setSaving(true)
     const profileObj: ConversionProfile = { operations: buildOps(opForm), groups, rules, ruleProviders: profile.profile.ruleProviders }
     try {
       const p = await api.updateProfile(profile.id, { name, target, subscriptionIds: subIds, script: script || undefined, profile: profileObj })
@@ -279,39 +374,97 @@ function ProfileDetail({
       onSaved(p)
     } catch (e) {
       fail(e)
+    } finally {
+      setSaving(false)
     }
   }
 
   const saveAsTemplate = async () => {
-    const label = prompt('模板名称：', name + ' 模板')
-    if (!label) return
+    const label = templateName.trim()
+    if (!label || templateSaving) return
+    setTemplateSaving(true)
     try {
       await api.createTemplate({ name: label, description: '（我的模板）', profile: { operations: buildOps(opForm), groups, rules }, script: script || undefined })
       await reloadTemplates()
+      setTemplateOpen(false)
       ok(`已存为模板「${label}」`)
     } catch (e) {
       fail(e)
+    } finally {
+      setTemplateSaving(false)
     }
   }
 
   const applyTemplate = (key: string) => {
     const t = templates.find((x) => x.key === key)
     if (!t) return
-    if (!confirm(`套用模板「${t.label}」会覆盖当前的节点处理/分组/规则/脚本，继续？`)) return
+    setPendingTemplate(t)
+  }
+
+  const confirmApplyTemplate = () => {
+    const t = pendingTemplate
+    if (!t) return
     setOpForm(parseOps(t.profile.operations))
     setGroups(structuredClone(t.profile.groups))
     setRules([...t.profile.rules])
     setScript(t.script || '')
     setShowScript(!!t.script)
+    setPendingTemplate(null)
   }
 
   const viewOutput = async () => {
+    if (outputLoading) return
+    setOutputLoading(true)
     try {
       const o = await api.output(profile.id)
       setOutput(o.ok ? o.config || '' : `生成失败：${o.error}`)
       outputCtl.open()
     } catch (e) {
       fail(e)
+    } finally {
+      setOutputLoading(false)
+    }
+  }
+
+  const loadVersions = async () => {
+    if (versionsLoading) return
+    setVersionsLoading(true)
+    try {
+      setVersions(await api.versions(profile.id))
+    } catch (e) {
+      fail(e)
+    } finally {
+      setVersionsLoading(false)
+    }
+  }
+
+  const rollback = async (versionId: string) => {
+    if (rollbackId) return
+    setRollbackId(versionId)
+    try {
+      const p = await api.rollback(profile.id, versionId)
+      setVersions([])
+      onSaved(p)
+      ok('已回滚')
+    } catch (e) {
+      fail(e)
+    } finally {
+      setRollbackId(null)
+    }
+  }
+
+  const remove = async () => {
+    if (deleting) return
+    setDeleting(true)
+    try {
+      await api.deleteProfile(profile.id)
+      setDeleteOpen(false)
+      onDeleted()
+      ok('已删除配置')
+    } catch (e) {
+      fail(e)
+    } finally {
+      setDeleting(false)
     }
   }
 
@@ -354,10 +507,10 @@ function ProfileDetail({
     <Stack gap="md">
       {/* 基本信息 + 操作 */}
       <Card>
-        <Group grow align="flex-start">
+        <Box className="form-grid form-grid-2">
           <TextInput label="名称" value={name} onChange={(e) => setName(e.currentTarget.value)} />
           <NativeSelect label="输出格式" value={target} onChange={(e) => setTarget(e.currentTarget.value)} data={renderers} />
-        </Group>
+        </Box>
         <TextInput
           mt="sm"
           label={
@@ -374,7 +527,11 @@ function ProfileDetail({
           <Text fz="sm" fw={500} mb={6}>
             关联订阅
           </Text>
-          {subs.length === 0 ? (
+          {subsLoading ? (
+            <Skeleton h={32} radius={6} />
+          ) : subsError ? (
+            <LoadError message={subsError} onRetry={onRetrySubs} />
+          ) : subs.length === 0 ? (
             <Text c="dimmed" fz="sm">
               先去「订阅」页添加订阅
             </Text>
@@ -391,8 +548,8 @@ function ProfileDetail({
           )}
         </Box>
 
-        <Group mt="md" gap={8}>
-          <Button leftSection={<ISave size={15} />} onClick={save}>
+        <Box className="profile-actions" mt="md">
+          <Button leftSection={<ISave size={15} />} loading={saving} onClick={() => void save()}>
             保存
           </Button>
           <NativeSelect
@@ -403,16 +560,24 @@ function ProfileDetail({
             }}
             data={[{ value: '', label: '从模板开始…' }, ...templates.map((t) => ({ value: t.key, label: `${t.serverId ? '★ ' : ''}${t.label}` }))]}
           />
-          <Button variant="default" leftSection={<ITemplate size={14} />} onClick={saveAsTemplate}>
+          <Button
+            variant="default"
+            leftSection={<ITemplate size={14} />}
+            onClick={() => {
+              setTemplateName(`${name} 模板`)
+              setTemplateOpen(true)
+            }}
+          >
             存为模板
           </Button>
-          <Button variant="default" leftSection={<IPlay size={14} />} onClick={viewOutput}>
+          <Button variant="default" leftSection={<IPlay size={14} />} loading={outputLoading} onClick={() => void viewOutput()}>
             查看输出
           </Button>
           <Button
             variant="default"
             leftSection={<IHistory size={14} />}
-            onClick={() => api.versions(profile.id).then(setVersions).catch(fail)}
+            loading={versionsLoading}
+            onClick={() => void loadVersions()}
           >
             版本
           </Button>
@@ -426,11 +591,10 @@ function ProfileDetail({
           >
             Agent
           </Button>
-          <Box style={{ flex: 1 }} />
-          <ActionIcon size="lg" variant="subtle" color="red" onClick={() => api.deleteProfile(profile.id).then(onDeleted).catch(fail)} aria-label="删除配置">
+          <ActionIcon size="lg" variant="subtle" color="red" onClick={() => setDeleteOpen(true)} aria-label={`删除配置 ${name}`}>
             <ITrash size={15} />
           </ActionIcon>
-        </Group>
+        </Box>
 
         {versions.length > 0 && (
           <Box mt="md">
@@ -439,23 +603,16 @@ function ProfileDetail({
             </Text>
             <Stack gap={4}>
               {versions.map((v) => (
-                <Group key={v.id} justify="space-between" wrap="nowrap">
+                <Group key={v.id} justify="space-between" wrap="wrap">
                   <Text fz={12} c="dimmed">
                     {new Date(v.createdAt).toLocaleString()} — {v.note || '快照'}
                   </Text>
                   <Button
                     size="compact-xs"
                     variant="subtle"
-                    onClick={() =>
-                      api
-                        .rollback(profile.id, v.id)
-                        .then((p) => {
-                          setVersions([])
-                          onSaved(p)
-                          ok('已回滚')
-                        })
-                        .catch(fail)
-                    }
+                    loading={rollbackId === v.id}
+                    disabled={rollbackId !== null && rollbackId !== v.id}
+                    onClick={() => void rollback(v.id)}
                   >
                     回滚
                   </Button>
@@ -500,6 +657,7 @@ function ProfileDetail({
             height={300}
             context={`用户正在编辑配置：id=${profile.id}，name=「${name}」。除非明确指定其它档，所有 read/write/preview/validate/save_template/apply_template 操作都针对这个档（profileId=${profile.id}）。`}
           />
+          {agentReloading && <Text c="dimmed" fz="xs" mt="xs">正在同步 Agent 的改动…</Text>}
         </Card>
       )}
 
@@ -533,18 +691,18 @@ function ProfileDetail({
           <Checkbox label="地区打标签" checked={opForm.tagRegions} onChange={(e) => setOp({ tagRegions: e.currentTarget.checked })} />
           <Checkbox label="按名称排序" checked={opForm.sortByName} onChange={(e) => setOp({ sortByName: e.currentTarget.checked })} />
         </Group>
-        <Group grow align="flex-start">
+        <Box className="form-grid form-grid-2">
           <TextInput label="剔除节点（正则）" placeholder="过期|剩余|官网|流量" value={opForm.dropPattern} onChange={(e) => setOp({ dropPattern: e.currentTarget.value })} />
           <TextInput label="只保留节点（正则）" placeholder="留空 = 不限" value={opForm.keepPattern} onChange={(e) => setOp({ keepPattern: e.currentTarget.value })} />
-        </Group>
-        <Group grow align="flex-start" mt="sm">
+        </Box>
+        <Box className="form-grid form-grid-2" mt="sm">
           <TextInput label="重命名 · 匹配（正则）" value={opForm.renameFrom} onChange={(e) => setOp({ renameFrom: e.currentTarget.value })} />
           <TextInput label="重命名 · 替换为" value={opForm.renameTo} onChange={(e) => setOp({ renameTo: e.currentTarget.value })} />
-        </Group>
+        </Box>
       </Card>
 
       {/* ② 代理组 */}
-      <Card style={{ opacity: groupsRulesIgnored ? 0.5 : 1, pointerEvents: groupsRulesIgnored ? 'none' : undefined }}>
+      <Card className={groupsRulesIgnored ? 'config-section-disabled' : undefined} aria-disabled={groupsRulesIgnored}>
         <CardHead right={<DimIcon><IGlobe size={15} /></DimIcon>}>
           <StepNum n={2} />
           <Text fw={600}>代理组</Text>
@@ -553,16 +711,17 @@ function ProfileDetail({
           <Checkbox
             label="地区自动分组（按节点生成 HK/US/JP… 测速组）"
             checked={autoRegion}
+            disabled={groupsRulesIgnored}
             onChange={toggleAutoRegion}
           />
           <Group gap={6}>
-            <Button size="compact-sm" variant="default" leftSection={<IPlus size={13} />} onClick={() => addCommon(COMMON_GROUPS.select)}>
+            <Button size="compact-sm" variant="default" disabled={groupsRulesIgnored} leftSection={<IPlus size={13} />} onClick={() => addCommon(COMMON_GROUPS.select)}>
               节点选择
             </Button>
-            <Button size="compact-sm" variant="default" leftSection={<IPlus size={13} />} onClick={() => addCommon(COMMON_GROUPS.autoSelect)}>
+            <Button size="compact-sm" variant="default" disabled={groupsRulesIgnored} leftSection={<IPlus size={13} />} onClick={() => addCommon(COMMON_GROUPS.autoSelect)}>
               自动选择
             </Button>
-            <Button size="compact-sm" variant="default" leftSection={<IPlus size={13} />} onClick={() => setGroups((gs) => [...gs, { name: '新组', type: 'select', includeAll: true }])}>
+            <Button size="compact-sm" variant="default" disabled={groupsRulesIgnored} leftSection={<IPlus size={13} />} onClick={() => setGroups((gs) => [...gs, { name: '新组', type: 'select', includeAll: true }])}>
               空白组
             </Button>
           </Group>
@@ -573,24 +732,25 @@ function ProfileDetail({
             .map((g) => {
               const idx = groups.indexOf(g)
               return (
-                <Box key={idx} p={10} style={{ border: '1px solid var(--mantine-color-default-border)', borderRadius: 10 }}>
-                  <Group wrap="nowrap" gap={8}>
-                    <TextInput style={{ flex: 2 }} value={g.name} onChange={(e) => updateGroup(idx, { name: e.currentTarget.value })} />
+                <Box key={idx} className="proxy-group-editor">
+                  <Box className="proxy-group-main">
+                    <TextInput label="组名" disabled={groupsRulesIgnored} value={g.name} onChange={(e) => updateGroup(idx, { name: e.currentTarget.value })} />
                     <NativeSelect
-                      style={{ flex: 1 }}
+                      label="类型"
+                      disabled={groupsRulesIgnored}
                       value={g.type}
                       onChange={(e) => updateGroup(idx, { type: e.currentTarget.value as ProxyGroupDef['type'] })}
                       data={['select', 'url-test', 'fallback', 'load-balance']}
                     />
-                    <Checkbox label="全部节点" checked={!!g.includeAll} onChange={(e) => updateGroup(idx, { includeAll: e.currentTarget.checked })} />
-                    <ActionIcon variant="subtle" color="red" onClick={() => delGroup(idx)} aria-label="删除组">
+                    <Checkbox className="proxy-group-checkbox" label="全部节点" disabled={groupsRulesIgnored} checked={!!g.includeAll} onChange={(e) => updateGroup(idx, { includeAll: e.currentTarget.checked })} />
+                    <ActionIcon className="proxy-group-delete" variant="subtle" color="red" disabled={groupsRulesIgnored} onClick={() => delGroup(idx)} aria-label={`删除代理组 ${g.name}`}>
                       <ITrash size={14} />
                     </ActionIcon>
-                  </Group>
-                  <Group grow mt={6} align="flex-start">
-                    <TextInput placeholder="filter 正则（可选）" value={g.filter || ''} onChange={(e) => updateGroup(idx, { filter: e.currentTarget.value })} />
-                    <TextInput placeholder="excludeFilter 正则（可选）" value={g.excludeFilter || ''} onChange={(e) => updateGroup(idx, { excludeFilter: e.currentTarget.value })} />
-                  </Group>
+                  </Box>
+                  <Box className="form-grid form-grid-2" mt="sm">
+                    <TextInput label="包含过滤（正则，可选）" disabled={groupsRulesIgnored} value={g.filter || ''} onChange={(e) => updateGroup(idx, { filter: e.currentTarget.value })} />
+                    <TextInput label="排除过滤（正则，可选）" disabled={groupsRulesIgnored} value={g.excludeFilter || ''} onChange={(e) => updateGroup(idx, { excludeFilter: e.currentTarget.value })} />
+                  </Box>
                 </Box>
               )
             })}
@@ -603,7 +763,7 @@ function ProfileDetail({
       </Card>
 
       {/* ③ 分流规则 */}
-      <Card style={{ opacity: groupsRulesIgnored ? 0.5 : 1, pointerEvents: groupsRulesIgnored ? 'none' : undefined }}>
+      <Card className={groupsRulesIgnored ? 'config-section-disabled' : undefined} aria-disabled={groupsRulesIgnored}>
         <CardHead right={<DimIcon><IFilter size={15} /></DimIcon>}>
           <StepNum n={3} />
           <Text fw={600}>分流规则</Text>
@@ -613,7 +773,7 @@ function ProfileDetail({
         </Text>
         <Group gap={8} mb="sm">
           {RULE_PRESETS.map((p) => (
-            <Chip key={p.key} checked={presetOn(p.rules)} onChange={() => togglePreset(p.key)} variant="light" size="sm">
+            <Chip key={p.key} checked={presetOn(p.rules)} disabled={groupsRulesIgnored} onChange={() => togglePreset(p.key)} variant="light" size="sm">
               {p.label}
             </Chip>
           ))}
@@ -623,6 +783,7 @@ function ProfileDetail({
         </Text>
         <Textarea
           rows={8}
+          disabled={groupsRulesIgnored}
           value={rules.join('\n')}
           onChange={(e) => setRules(e.currentTarget.value.split('\n').map((s) => s.trim()).filter(Boolean))}
           styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)', fontSize: 12.5 } }}
@@ -656,6 +817,56 @@ function ProfileDetail({
           </Box>
         </Collapse>
       </Card>
+
+      <Modal opened={templateOpen} onClose={() => !templateSaving && setTemplateOpen(false)} title="存为模板" centered>
+        <TextInput
+          label="模板名称"
+          value={templateName}
+          onChange={(e) => setTemplateName(e.currentTarget.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') void saveAsTemplate()
+          }}
+        />
+        <Group justify="flex-end" mt="lg">
+          <Button variant="default" autoFocus disabled={templateSaving} onClick={() => setTemplateOpen(false)}>
+            取消
+          </Button>
+          <Button loading={templateSaving} disabled={!templateName.trim()} onClick={() => void saveAsTemplate()}>
+            保存模板
+          </Button>
+        </Group>
+      </Modal>
+
+      <Modal opened={!!pendingTemplate} onClose={() => setPendingTemplate(null)} title="套用模板" centered>
+        <Text fz="sm">
+          套用模板“{pendingTemplate?.label}”会替换当前尚未保存的节点处理、代理组、规则和脚本。
+        </Text>
+        <Group justify="flex-end" mt="lg">
+          <Button variant="default" autoFocus onClick={() => setPendingTemplate(null)}>
+            取消
+          </Button>
+          <Button onClick={confirmApplyTemplate}>套用</Button>
+        </Group>
+      </Modal>
+
+      <Modal
+        opened={deleteOpen}
+        onClose={() => !deleting && setDeleteOpen(false)}
+        title="删除配置"
+        centered
+        closeOnClickOutside={!deleting}
+        closeOnEscape={!deleting}
+      >
+        <Text fz="sm">确认删除配置“{name}”？对应的公开订阅链接将立即失效，历史版本也会一并删除。</Text>
+        <Group justify="flex-end" mt="lg">
+          <Button variant="default" autoFocus disabled={deleting} onClick={() => setDeleteOpen(false)}>
+            取消
+          </Button>
+          <Button color="red" loading={deleting} onClick={() => void remove()}>
+            删除
+          </Button>
+        </Group>
+      </Modal>
 
       <Modal opened={outputOpen} onClose={outputCtl.close} title="输出预览" size="xl" scrollAreaComponent={ScrollArea.Autosize}>
         <Code block style={{ maxHeight: '70vh', overflow: 'auto', fontSize: 12 }}>
