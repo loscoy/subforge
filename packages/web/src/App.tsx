@@ -21,11 +21,10 @@ import { Mcp } from './components/Mcp'
 import { Profiles } from './components/Profiles'
 import { Subscriptions } from './components/Subscriptions'
 import { IBrand, ILayers, IMoon, IPlug, IRss, ISparkles, ISun } from './icons'
+import { readView, writeView, type View } from './navigation'
 import type { Meta } from './types'
 
-type Tab = 'subs' | 'profiles' | 'agent' | 'mcp'
-
-const TABS: { key: Tab; label: string; title: string; sub: string; icon: typeof IRss }[] = [
+const TABS: { key: View; label: string; title: string; sub: string; icon: typeof IRss }[] = [
   { key: 'subs', label: '订阅', title: '订阅', sub: '添加机场订阅或手工节点，SubForge 会抓取并解析。', icon: IRss },
   { key: 'profiles', label: '配置', title: '配置', sub: '把订阅按你的规则转成可用配置，用分享链接分发。', icon: ILayers },
   { key: 'agent', label: 'Agent', title: 'Agent', sub: '用对话调整配置、写脚本、管理模板。', icon: ISparkles },
@@ -72,7 +71,7 @@ function Brand() {
 }
 
 export function App() {
-  const [tab, setTab] = useState<Tab>('profiles')
+  const [tab, setTab] = useState<View>(() => readView(window.location.search))
   const [navOpened, setNavOpened] = useState(false)
   const [meta, setMeta] = useState<Meta | null>(null)
   const [needToken, setNeedToken] = useState(false)
@@ -91,6 +90,20 @@ export function App() {
   useEffect(() => {
     loadMeta()
   }, [])
+  useEffect(() => {
+    const onPopState = () => setTab(readView(window.location.search))
+    window.addEventListener('popstate', onPopState)
+    return () => window.removeEventListener('popstate', onPopState)
+  }, [])
+
+  const selectTab = (next: View) => {
+    if (next !== tab) {
+      const search = writeView(window.location.search, next)
+      window.history.pushState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
+      setTab(next)
+    }
+    setNavOpened(false)
+  }
 
   if (needToken) {
     return (
@@ -156,10 +169,7 @@ export function App() {
                 active={tab === t.key}
                 label={t.label}
                 leftSection={<Icon size={17} />}
-                onClick={() => {
-                  setTab(t.key)
-                  setNavOpened(false)
-                }}
+                onClick={() => selectTab(t.key)}
                 variant="light"
                 style={{ borderRadius: 9, fontWeight: 500 }}
               />
