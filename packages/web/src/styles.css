@@ -144,6 +144,41 @@ body {
 .config-section-disabled {
   background: var(--sf-surface-subtle);
 }
+.mcp-status {
+  padding: 4px 0;
+}
+.mcp-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  gap: 40px;
+  align-items: start;
+}
+.mcp-copy-field {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: stretch;
+}
+.mcp-copy-value {
+  min-width: 0;
+  overflow-x: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--sf-border-subtle);
+  background: var(--sf-surface-subtle);
+  white-space: nowrap;
+}
+.mcp-tool-list {
+  border-radius: 8px;
+  background: var(--sf-surface-subtle);
+}
+.mcp-tool-row {
+  margin: 0 14px;
+  padding: 12px 2px;
+}
+.mcp-tool-row + .mcp-tool-row {
+  border-top: 1px solid var(--sf-border-subtle);
+}
 
 /* ---------- Agent 聊天 ---------- */
 .chat {
@@ -260,7 +295,8 @@ body {
   .subscription-row,
   .profiles-layout,
   .form-grid-2,
-  .proxy-group-main {
+  .proxy-group-main,
+  .mcp-layout {
     grid-template-columns: minmax(0, 1fr);
   }
   .subscription-row .mantine-Group-root:last-child {
