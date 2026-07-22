@@ -7,6 +7,8 @@
   --sf-border-subtle: #e7e7eb;
   --sf-border-interactive: #c9cad1;
   --sf-focus-ring: rgba(124, 58, 237, 0.34);
+  --sf-amber: #e8590c;
+  --sf-amber-bg: rgba(245, 159, 0, 0.12);
 }
 [data-mantine-color-scheme='dark'] {
   --sf-app-background: #0d0f17;
@@ -15,6 +17,8 @@
   --sf-border-subtle: #2b2e39;
   --sf-border-interactive: #444856;
   --sf-focus-ring: rgba(167, 139, 250, 0.46);
+  --sf-amber: #f59f00;
+  --sf-amber-bg: rgba(245, 159, 0, 0.15);
 }
 [data-mantine-color-scheme='light'] {
   --mantine-color-default-border: var(--sf-border-interactive);
@@ -70,27 +74,131 @@ body {
   padding: 8px 2px;
 }
 
-/* ---------- 页面布局 ---------- */
-.subscriptions-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 360px;
-  gap: 24px;
-  align-items: start;
+/* ---------- 顶栏导航（B 布局） ---------- */
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 20px;
+  height: 54px;
+  background: var(--sf-surface);
+  border-bottom: 1px solid var(--sf-border-subtle);
+  position: sticky;
+  top: 0;
+  z-index: 40;
 }
-.subscription-row {
+.topbar-brand {
+  padding-right: 18px;
+}
+.topbar-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.topbar-tab {
+  height: 34px;
+  padding: 0 16px;
+  border-radius: 7px;
+  font-size: 13.5px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  color: var(--mantine-color-text);
+  transition: background-color 160ms ease, color 160ms ease;
+}
+.topbar-tab:hover {
+  background: var(--sf-surface-subtle);
+  text-decoration: none;
+}
+.topbar-tab[data-active] {
+  background: var(--mantine-color-violet-light);
+  color: var(--mantine-color-violet-light-color);
+}
+
+/* ---------- 页面骨架 ---------- */
+.page-body {
+  padding: 18px 28px 40px;
+  box-sizing: border-box;
+  min-width: 0;
+}
+
+/* ---------- Agent 抽屉 ---------- */
+.agent-drawer {
+  width: 340px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--sf-border-subtle);
+  background: var(--sf-surface);
+  display: flex;
+  flex-direction: column;
+  position: sticky;
+  top: 54px;
+  height: calc(100dvh - 54px);
+  box-sizing: border-box;
+}
+.agent-drawer-head {
+  border-bottom: 1px solid var(--sf-border-subtle);
+}
+
+/* ---------- 吸底保存栏 ---------- */
+.save-slot {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+}
+.save-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 12px 28px;
+  background: var(--sf-surface);
+  border-top: 1px solid var(--sf-border-subtle);
+  box-shadow: 0 -4px 16px rgba(16, 17, 20, 0.06);
+}
+
+/* ---------- 订阅表格 ---------- */
+.subs-table-head,
+.subs-table-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 16px;
-  align-items: start;
-  padding: 11px 12px;
-  border-radius: 8px;
+  grid-template-columns: 150px minmax(0, 1fr) 180px 110px 130px;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 18px;
+}
+.subs-table-head {
+  padding: 10px 18px;
+  border-bottom: 1px solid var(--sf-border-subtle);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--mantine-color-dimmed);
+}
+.subs-table-row:hover {
   background: var(--sf-surface-subtle);
 }
-.profiles-layout {
+
+/* ---------- 配置页（左列表 + 右详情单卡片） ---------- */
+.profiles-card {
   display: grid;
-  grid-template-columns: 212px minmax(0, 1fr);
-  gap: 24px;
-  align-items: start;
+  grid-template-columns: 236px minmax(0, 1fr);
+  align-items: stretch;
+  padding: 0;
+}
+.profiles-list {
+  border-right: 1px solid var(--sf-border-subtle);
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.profiles-list-head {
+  border-bottom: 1px solid var(--sf-border-subtle);
+}
+.profiles-detail {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.profiles-detail > * {
+  min-width: 0;
 }
 .profile-row {
   display: flex;
@@ -99,8 +207,8 @@ body {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 9px 11px;
-  border-radius: 7px;
+  padding: 12px 14px;
+  border-left: 3px solid transparent;
   transition: background-color 160ms ease, color 160ms ease;
 }
 .profile-row:hover {
@@ -108,16 +216,64 @@ body {
 }
 .profile-row[data-active] {
   background: var(--mantine-color-violet-light);
+  border-left-color: var(--mantine-color-violet-6);
 }
-.profile-actions {
-  display: flex;
-  flex-wrap: wrap;
+.profile-head-grid {
+  display: grid;
+  grid-template-columns: minmax(150px, 1fr) 140px minmax(230px, 1.4fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+/* 区块 tab */
+.section-tabs {
+  border-bottom: 1px solid var(--sf-border-subtle);
+}
+.section-tab {
+  display: inline-flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
+  padding: 12px 16px;
+  white-space: nowrap;
+  flex-shrink: 0;
+  color: var(--mantine-color-dimmed);
+  font-size: 13.5px;
+  font-weight: 600;
+  transition: background-color 160ms ease, color 160ms ease;
 }
-.profile-actions > .mantine-ActionIcon-root:last-child {
-  margin-left: auto;
+.section-tab:hover {
+  background: var(--sf-surface-subtle);
 }
+.section-tab[data-active] {
+  color: var(--mantine-color-violet-light-color);
+  box-shadow: inset 0 -2px 0 var(--mantine-color-violet-6);
+}
+.section-tab-badge {
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 100px;
+  background: var(--sf-surface-subtle);
+  color: var(--mantine-color-dimmed);
+}
+.section-tab[data-active] .section-tab-badge {
+  background: var(--mantine-color-violet-light);
+  color: var(--mantine-color-violet-light-color);
+}
+.script-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--sf-amber);
+  background: var(--sf-amber-bg);
+  padding: 4px 12px;
+  border-radius: 100px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+
 .form-grid {
   display: grid;
   gap: 12px;
@@ -141,17 +297,17 @@ body {
 .proxy-group-delete {
   margin-bottom: 3px;
 }
-.config-section-disabled {
-  background: var(--sf-surface-subtle);
-}
-.mcp-status {
-  padding: 4px 0;
-}
-.mcp-layout {
+.mcp-card {
   display: grid;
-  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
-  gap: 40px;
-  align-items: start;
+  grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
+  padding: 0;
+}
+.mcp-conn {
+  border-right: 1px solid var(--sf-border-subtle);
+  min-width: 0;
+}
+.mcp-pane-head {
+  border-bottom: 1px solid var(--sf-border-subtle);
 }
 .mcp-copy-field {
   position: relative;
@@ -167,17 +323,6 @@ body {
   border: 1px solid var(--sf-border-subtle);
   background: var(--sf-surface-subtle);
   white-space: nowrap;
-}
-.mcp-tool-list {
-  border-radius: 8px;
-  background: var(--sf-surface-subtle);
-}
-.mcp-tool-row {
-  margin: 0 14px;
-  padding: 12px 2px;
-}
-.mcp-tool-row + .mcp-tool-row {
-  margin-top: 2px;
 }
 
 /* ---------- Agent 聊天 ---------- */
@@ -283,24 +428,62 @@ body {
     transition: none;
   }
 }
+@media (max-width: 64em) {
+  .profile-head-grid {
+    grid-template-columns: minmax(0, 1fr) 140px;
+  }
+  .subs-table-head {
+    display: none;
+  }
+  .subs-table-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 4px;
+  }
+  .mcp-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mcp-conn {
+    border-right: none;
+    border-bottom: 1px solid var(--sf-border-subtle);
+  }
+}
 @media (max-width: 48em) {
   .mantine-ActionIcon-root {
     min-width: 44px;
     min-height: 44px;
   }
-  .subscriptions-layout,
-  .subscription-row,
-  .profiles-layout,
   .form-grid-2,
   .proxy-group-main,
-  .mcp-layout {
+  .profile-head-grid,
+  .profiles-card {
     grid-template-columns: minmax(0, 1fr);
   }
-  .subscription-row .mantine-Group-root:last-child {
-    justify-content: flex-end;
+  .profiles-list {
+    border-right: none;
+    border-bottom: 1px solid var(--sf-border-subtle);
   }
-  .profile-actions > .mantine-ActionIcon-root:last-child {
-    margin-left: 0;
+  .topbar {
+    overflow-x: auto;
+  }
+  .topbar-status {
+    display: none;
+  }
+  .page-body {
+    padding: 16px 16px 32px;
+  }
+  .save-bar {
+    padding: 10px 16px;
+  }
+  .agent-drawer {
+    position: fixed;
+    right: 0;
+    top: 54px;
+    width: min(340px, 100vw);
+    z-index: 50;
+    box-shadow: var(--mantine-shadow-md);
+  }
+  .section-tabs {
+    overflow-x: auto;
   }
   .proxy-group-checkbox,
   .proxy-group-delete {

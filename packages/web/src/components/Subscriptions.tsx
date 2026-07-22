@@ -1,13 +1,22 @@
-import { ActionIcon, Badge, Box, Button, Card, Group, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core'
+import { ActionIcon, Badge, Box, Button, Card, Group, Modal, Stack, Text, Textarea, TextInput, Tooltip } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { fmtBytes, fmtExpire, usedBytes } from '../format'
-import { IInbox, IPlus, IRefresh, IRss, ITrash } from '../icons'
+import { IInbox, IPlus, IRefresh, ITrash } from '../icons'
 import type { Subscription } from '../types'
 import { ListSkeleton, LoadError } from './AsyncState'
 
-export function Subscriptions() {
+function fmtTime(ts?: number) {
+  if (!ts) return '未抓取'
+  const d = new Date(ts)
+  const now = new Date()
+  const sameDay = d.toDateString() === now.toDateString()
+  if (sameDay) return `今天 ${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+  return `${d.getMonth() + 1}/${d.getDate()}`
+}
+
+export function Subscriptions({ addOpened, onAddClose }: { addOpened: boolean; onAddClose: () => void }) {
   const [subs, setSubs] = useState<Subscription[]>([])
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
@@ -45,6 +54,7 @@ export function Subscriptions() {
       setUrl('')
       setContent('')
       notifications.show({ color: 'teal', message: '已添加订阅' })
+      onAddClose()
       await load()
     } catch (e) {
       fail(e)
@@ -81,127 +91,132 @@ export function Subscriptions() {
     }
   }
 
-  return (
-    <Box className="subscriptions-layout">
-      <Box style={{ flex: 1, minWidth: 0 }}>
-        {loading ? (
-          <Card>
-            <ListSkeleton rows={4} />
-          </Card>
-        ) : loadError ? (
-          <LoadError message={loadError} onRetry={() => void load(true)} />
-        ) : subs.length === 0 ? (
-          <Card>
-            <Stack align="center" gap={6} py={40} c="dimmed">
-              <IInbox size={34} />
-              <Text fw={600} c="var(--mantine-color-text)">
-                还没有订阅
-              </Text>
-              <Text fz="sm" ta="center">
-                粘贴订阅链接或节点后，SubForge 会自动抓取解析。
-              </Text>
-            </Stack>
-          </Card>
-        ) : (
-          <Card>
-            <Group justify="space-between" mb="sm">
-              <Group gap={8}>
-                <IRss size={15} />
-                <Text fw={600}>我的订阅</Text>
-              </Group>
-              <Badge variant="light" color="gray">
-                {subs.length}
-              </Badge>
-            </Group>
-            <Stack gap={4}>
-              {subs.map((s) => (
-                <Box
-                  key={s.id}
-                  className="subscription-row"
-                >
-                  <Box style={{ minWidth: 0 }}>
-                    <Text fw={500} fz={14}>
-                      {s.name}
-                    </Text>
-                    <Text className="mono" fz={12} c="dimmed" truncate maw={360}>
-                      {s.url || '手工节点'}
-                    </Text>
-                    <Text fz={12} c="dimmed">
-                      {s.fetchedAt ? `更新于 ${new Date(s.fetchedAt).toLocaleString()}` : '未抓取'}
-                    </Text>
-                    {s.userInfo && (s.userInfo.total !== undefined || s.userInfo.expire) && (
-                      <Group gap={6} mt={6}>
-                        {s.userInfo.total !== undefined && (
-                          <Badge variant="light" color="gray" tt="none" fw={500}>
-                            {fmtBytes(usedBytes(s.userInfo))} / {fmtBytes(s.userInfo.total)}
-                          </Badge>
-                        )}
-                        {s.userInfo.expire && (
-                          <Badge variant="light" color="gray" tt="none" fw={500}>
-                            到期 {fmtExpire(s.userInfo.expire)}
-                          </Badge>
-                        )}
-                      </Group>
-                    )}
-                  </Box>
-                  <Group gap={6} wrap="nowrap">
-                    {s.url && (
-                      <Button
-                        size="xs"
-                        variant="default"
-                        leftSection={<IRefresh size={14} />}
-                        loading={refreshingId === s.id}
-                        disabled={refreshingId !== null && refreshingId !== s.id}
-                        onClick={() => void refresh(s)}
-                      >
-                        刷新
-                      </Button>
-                    )}
-                    <ActionIcon
-                      size="lg"
-                      variant="subtle"
-                      color="red"
-                      loading={deletingId === s.id}
-                      onClick={() => setDeleteTarget(s)}
-                      aria-label={`删除订阅 ${s.name}`}
-                    >
-                      <ITrash size={15} />
-                    </ActionIcon>
-                  </Group>
-                </Box>
-              ))}
-            </Stack>
-          </Card>
-        )}
-      </Box>
+  const usage = (s: Subscription) => {
+    if (!s.userInfo || s.userInfo.total === undefined) return '—'
+    return `${fmtBytes(usedBytes(s.userInfo))} / ${fmtBytes(s.userInfo.total)}`
+  }
 
-      <Box style={{ minWidth: 0 }}>
-        <Card>
-          <Group gap={8} mb="sm">
-            <IPlus size={15} />
-            <Text fw={600}>新增订阅</Text>
-          </Group>
-          <Stack gap="sm">
-            <TextInput label="名称" placeholder="例如 机场A" value={name} onChange={(e) => setName(e.currentTarget.value)} />
-            <TextInput
-              label="订阅链接"
-              placeholder="https://…（可留空）"
-              value={url}
-              onChange={(e) => setUrl(e.currentTarget.value)}
-            />
-            <Textarea
-              label="或粘贴节点"
-              placeholder="每行一个 vmess:// trojan:// … 或整段 base64 / Clash YAML"
-              rows={5}
-              value={content}
-              onChange={(e) => setContent(e.currentTarget.value)}
-            />
+  return (
+    <Box className="subs-page">
+      {loading ? (
+        <Card maw={960}>
+          <ListSkeleton rows={4} />
+        </Card>
+      ) : loadError ? (
+        <LoadError message={loadError} onRetry={() => void load(true)} />
+      ) : subs.length === 0 ? (
+        <Card maw={960}>
+          <Stack align="center" gap={6} py={40} c="dimmed">
+            <IInbox size={34} />
+            <Text fw={600} c="var(--mantine-color-text)">
+              还没有订阅
+            </Text>
+            <Text fz="sm" ta="center">
+              点右上「新增订阅」，粘贴订阅链接或节点后，SubForge 会自动抓取解析。
+            </Text>
+          </Stack>
+        </Card>
+      ) : (
+        <Card maw={960} padding={0}>
+          <Box className="subs-table-head">
+            <span>名称</span>
+            <span>来源</span>
+            <span>用量</span>
+            <span>更新时间</span>
+            <span style={{ textAlign: 'right' }}>操作</span>
+          </Box>
+          {subs.map((s) => (
+            <Box key={s.id} className="subs-table-row">
+              <Group gap={7} wrap="nowrap" style={{ minWidth: 0 }}>
+                <Text fw={600} fz={14} truncate>
+                  {s.name}
+                </Text>
+                {!s.url && (
+                  <Badge variant="light" color="violet" size="sm" tt="none" fw={600} style={{ flexShrink: 0 }}>
+                    手工
+                  </Badge>
+                )}
+              </Group>
+              <Text className="mono" fz={12} c="dimmed" truncate>
+                {s.url || (s.content ? '手工节点' : '—')}
+              </Text>
+              <Group gap={6} wrap="nowrap">
+                <Text fz={13} style={{ whiteSpace: 'nowrap' }}>
+                  {usage(s)}
+                </Text>
+                {s.userInfo?.expire && (
+                  <Badge variant="light" color="gray" size="sm" tt="none" fw={500}>
+                    到期 {fmtExpire(s.userInfo.expire)}
+                  </Badge>
+                )}
+              </Group>
+              <Text fz={13} c="dimmed">
+                {fmtTime(s.fetchedAt)}
+              </Text>
+              <Group gap={6} justify="flex-end" wrap="nowrap">
+                {s.url && (
+                  <Tooltip label="刷新">
+                    <ActionIcon
+                      variant="default"
+                      size={30}
+                      radius={7}
+                      loading={refreshingId === s.id}
+                      disabled={refreshingId !== null && refreshingId !== s.id}
+                      onClick={() => void refresh(s)}
+                      aria-label={`刷新订阅 ${s.name}`}
+                    >
+                      <IRefresh size={13} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+                <Tooltip label="删除">
+                  <ActionIcon
+                    variant="default"
+                    size={30}
+                    radius={7}
+                    c="red"
+                    loading={deletingId === s.id}
+                    onClick={() => setDeleteTarget(s)}
+                    aria-label={`删除订阅 ${s.name}`}
+                  >
+                    <ITrash size={13} />
+                  </ActionIcon>
+                </Tooltip>
+              </Group>
+            </Box>
+          ))}
+          <Text fz={12.5} c="dimmed" px={18} py={10}>
+            共 {subs.length} 个订阅
+          </Text>
+        </Card>
+      )}
+
+      <Modal opened={addOpened} onClose={() => !adding && onAddClose()} title="新增订阅" centered>
+        <Stack gap="sm">
+          <TextInput label="名称" placeholder="例如 机场A" value={name} onChange={(e) => setName(e.currentTarget.value)} data-autofocus />
+          <TextInput
+            label="订阅链接"
+            placeholder="https://…（可留空）"
+            value={url}
+            onChange={(e) => setUrl(e.currentTarget.value)}
+          />
+          <Textarea
+            label="或粘贴节点"
+            placeholder="每行一个 vmess:// trojan:// … 或整段 base64 / Clash YAML"
+            rows={5}
+            value={content}
+            onChange={(e) => setContent(e.currentTarget.value)}
+          />
+          <Group justify="flex-end" mt={4}>
+            <Button variant="default" disabled={adding} onClick={onAddClose}>
+              取消
+            </Button>
             <Button leftSection={<IPlus size={15} />} loading={adding} onClick={() => void add()}>
               添加订阅
             </Button>
-          </Stack>
-        </Card>
-      </Box>
+          </Group>
+        </Stack>
+      </Modal>
 
       <Modal
         opened={!!deleteTarget}
@@ -211,9 +226,7 @@ export function Subscriptions() {
         closeOnClickOutside={!deletingId}
         closeOnEscape={!deletingId}
       >
-        <Text fz="sm">
-          确认删除订阅“{deleteTarget?.name}”？关联配置不会被删除，但将不再从该订阅读取节点。
-        </Text>
+        <Text fz="sm">确认删除订阅“{deleteTarget?.name}”？关联配置不会被删除，但将不再从该订阅读取节点。</Text>
         <Group justify="flex-end" mt="lg">
           <Button variant="default" data-autofocus disabled={!!deletingId} onClick={() => setDeleteTarget(null)}>
             取消

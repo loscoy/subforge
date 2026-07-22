@@ -8,8 +8,9 @@ import {
   Checkbox,
   Chip,
   Code,
-  Collapse,
+  CopyButton,
   Group,
+  Menu,
   Modal,
   NativeSelect,
   ScrollArea,
@@ -18,18 +19,18 @@ import {
   Text,
   Textarea,
   TextInput,
+  Tooltip,
   UnstyledButton,
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { api } from '../api'
-import {
-  IBot, ICode, IFilter, IGlobe, IHistory, ILayers, ILink, IPlay, IPlus, ISave, ISliders, ITemplate, ITrash, IZap,
-} from '../icons'
+import { AGENT_CHANGED_EVENT } from '../App'
+import { IAlert, ICheck, ICopy, IDots, IHistory, ILayers, IPlus, ISave, ISearch, ITrash } from '../icons'
 import { builtinTemplates, serverToUI, type UITemplate } from '../templates'
 import type { ConversionProfile, NodeOp, Profile, ProxyGroupDef, Subscription } from '../types'
-import { AgentChatPanel } from './AgentChatPanel'
 import { DetailSkeleton, ListSkeleton, LoadError } from './AsyncState'
 
 const ScriptEditor = lazy(() => import('./ScriptEditor').then((module) => ({ default: module.ScriptEditor })))
@@ -37,48 +38,20 @@ const ScriptEditor = lazy(() => import('./ScriptEditor').then((module) => ({ def
 const ok = (message: string) => notifications.show({ color: 'teal', message })
 const fail = (e: unknown) => notifications.show({ color: 'red', message: String(e) })
 
-function StepNum({ n }: { n: number }) {
-  return (
-    <Box
-      style={{
-        width: 21,
-        height: 21,
-        borderRadius: 6,
-        background: 'var(--mantine-color-violet-light)',
-        color: 'var(--mantine-color-violet-6)',
-        fontSize: 11.5,
-        fontWeight: 700,
-        display: 'grid',
-        placeItems: 'center',
-      }}
-    >
-      {n}
-    </Box>
-  )
-}
-
-function CardHead({ children, right }: { children: ReactNode; right?: ReactNode }) {
-  return (
-    <Group justify="space-between" mb="sm">
-      <Group gap={9}>{children}</Group>
-      {right}
-    </Group>
-  )
-}
-
-function DimIcon({ children }: { children: ReactNode }) {
-  return (
-    <Box c="dimmed" style={{ display: 'flex' }}>
-      {children}
-    </Box>
-  )
-}
-
-export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers: string[]; hasAgent: boolean }) {
+export function Profiles({
+  dts,
+  renderers,
+  onSelectionChange,
+}: {
+  dts: string
+  renderers: string[]
+  onSelectionChange?: (sel: { id: string; name: string } | null) => void
+}) {
   const [profiles, setProfiles] = useState<Profile[]>([])
   const [subs, setSubs] = useState<Subscription[]>([])
   const [sel, setSel] = useState<Profile | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [filter, setFilter] = useState('')
   const [profilesLoading, setProfilesLoading] = useState(true)
   const [profilesError, setProfilesError] = useState('')
   const [subsLoading, setSubsLoading] = useState(true)
@@ -87,6 +60,13 @@ export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers:
   const [detailError, setDetailError] = useState('')
   const [creating, setCreating] = useState(false)
   const detailRequest = useRef(0)
+
+  useEffect(() => {
+    onSelectionChange?.(sel ? { id: sel.id, name: sel.name } : null)
+    // 组件卸载（切走页面）时清空 Agent 抽屉的配置上下文
+    return () => onSelectionChange?.(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sel?.id, sel?.name])
 
   const loadProfiles = async (initial = false) => {
     if (initial) setProfilesLoading(true)
@@ -147,72 +127,86 @@ export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers:
     }
   }
 
+  const shown = filter.trim()
+    ? profiles.filter((p) => p.name.toLowerCase().includes(filter.trim().toLowerCase()))
+    : profiles
+
   return (
-    <Box className="profiles-layout">
-      <Box style={{ minWidth: 0 }}>
-        <Card padding={8}>
-          <Group justify="space-between" mb={6} px={6} pt={4}>
-            <Group gap={8}>
-              <ILayers size={15} />
-              <Text fw={600} fz="sm">
-                配置
-              </Text>
-            </Group>
-            <ActionIcon size={32} loading={creating} onClick={() => void create()} aria-label="新建配置">
-              <IPlus size={14} />
-            </ActionIcon>
-          </Group>
-          {profilesLoading ? (
+    <Card padding={0} className="profiles-card">
+      {/* 左：配置列表 */}
+      <Box className="profiles-list">
+        <Group gap={6} p={12} wrap="nowrap" className="profiles-list-head">
+          <TextInput
+            size="xs"
+            radius={7}
+            placeholder="搜索配置…"
+            leftSection={<ISearch size={13} />}
+            value={filter}
+            onChange={(e) => setFilter(e.currentTarget.value)}
+            style={{ flex: 1, minWidth: 0 }}
+            styles={{ input: { height: 32, fontSize: 13 } }}
+          />
+          <ActionIcon size={32} radius={7} loading={creating} onClick={() => void create()} aria-label="新建配置">
+            <IPlus size={14} />
+          </ActionIcon>
+        </Group>
+        {profilesLoading ? (
+          <Box px={12}>
             <ListSkeleton rows={4} />
-          ) : profilesError ? (
+          </Box>
+        ) : profilesError ? (
+          <Box p={12}>
             <LoadError message={profilesError} onRetry={() => void loadProfiles(true)} />
-          ) : profiles.length === 0 ? (
-            <Text c="dimmed" fz="sm" px={6} py={4}>
-              还没有配置，点右上「+」新建。
-            </Text>
-          ) : (
-            <Stack gap={2}>
-              {profiles.map((p) => {
-                const on = selectedId === p.id
-                return (
-                  <UnstyledButton
-                    key={p.id}
-                    className="profile-row"
-                    data-active={on || undefined}
-                    aria-pressed={on}
-                    onClick={() => void selectProfile(p.id)}
-                  >
-                    <Text fz={13.5} fw={on ? 600 : 400} c={on ? 'violet' : undefined} truncate>
-                      {p.name}
-                    </Text>
-                    <Badge variant="light" color="gray" size="sm" tt="none" fw={500}>
-                      {p.target}
-                    </Badge>
-                  </UnstyledButton>
-                )
-              })}
-            </Stack>
-          )}
-        </Card>
+          </Box>
+        ) : shown.length === 0 ? (
+          <Text c="dimmed" fz="sm" px={14} py={12}>
+            {profiles.length === 0 ? '还没有配置，点上方「+」新建。' : '没有匹配的配置。'}
+          </Text>
+        ) : (
+          <Box>
+            {shown.map((p) => {
+              const on = selectedId === p.id
+              return (
+                <UnstyledButton
+                  key={p.id}
+                  className="profile-row"
+                  data-active={on || undefined}
+                  aria-pressed={on}
+                  onClick={() => void selectProfile(p.id)}
+                >
+                  <Text fz={13.5} fw={on ? 600 : 400} c={on ? 'violet' : undefined} truncate>
+                    {p.name}
+                  </Text>
+                  <Badge variant="light" color="gray" size="sm" tt="none" fw={500}>
+                    {p.target}
+                  </Badge>
+                </UnstyledButton>
+              )
+            })}
+          </Box>
+        )}
       </Box>
 
-      <Box style={{ flex: 1, minWidth: 0 }}>
+      {/* 右：详情 */}
+      <Box className="profiles-detail">
         {detailLoading ? (
-          <DetailSkeleton />
+          <Box p={20}>
+            <DetailSkeleton />
+          </Box>
         ) : detailError ? (
-          <LoadError message={detailError} onRetry={() => selectedId && void selectProfile(selectedId)} />
+          <Box p={20}>
+            <LoadError message={detailError} onRetry={() => selectedId && void selectProfile(selectedId)} />
+          </Box>
         ) : !sel ? (
-          <Card>
-            <Stack align="center" gap={8} py={44} c="dimmed">
-              <ILayers size={34} />
-              <Text fw={600} c="var(--mantine-color-text)">
-                选择或新建一个配置
-              </Text>
-              <Text fz="sm" ta="center">
-                配置决定订阅怎么转：套模板、勾选分流、或写脚本。
-              </Text>
-            </Stack>
-          </Card>
+          <Stack align="center" gap={8} py={64} c="dimmed">
+            <ILayers size={34} />
+            <Text fw={600} c="var(--mantine-color-text)">
+              选择或新建一个配置
+            </Text>
+            <Text fz="sm" ta="center">
+              配置决定订阅怎么转：套模板、勾选分流、或写脚本。
+            </Text>
+          </Stack>
         ) : (
           <ProfileDetail
             key={sel.id}
@@ -223,7 +217,6 @@ export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers:
             onRetrySubs={() => void loadSubs()}
             dts={dts}
             renderers={renderers}
-            hasAgent={hasAgent}
             onSaved={(p) => {
               setSel(p)
               setSelectedId(p.id)
@@ -238,7 +231,7 @@ export function Profiles({ dts, renderers, hasAgent }: { dts: string; renderers:
           />
         )}
       </Box>
-    </Box>
+    </Card>
   )
 }
 
@@ -277,6 +270,13 @@ function buildOps(f: OpForm): NodeOp[] {
   return ops
 }
 
+type Section = 'nodes' | 'groups' | 'rules' | 'script'
+
+function fmtClock(ts: number) {
+  const d = new Date(ts)
+  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`
+}
+
 function ProfileDetail({
   profile,
   subs,
@@ -285,7 +285,6 @@ function ProfileDetail({
   onRetrySubs,
   dts,
   renderers,
-  hasAgent,
   onSaved,
   onDeleted,
 }: {
@@ -296,7 +295,6 @@ function ProfileDetail({
   onRetrySubs: () => void
   dts: string
   renderers: string[]
-  hasAgent: boolean
   onSaved: (p: Profile) => void
   onDeleted: () => void
 }) {
@@ -307,15 +305,17 @@ function ProfileDetail({
   const [groups, setGroups] = useState<ProxyGroupDef[]>(profile.profile.groups || [])
   const [rules, setRules] = useState<string[]>(profile.profile.rules || [])
   const [script, setScript] = useState(profile.script || '')
-  const [showScript, setShowScript] = useState(!!profile.script)
+  const [section, setSection] = useState<Section>('nodes')
   const [versions, setVersions] = useState<{ id: string; note?: string; createdAt: number }[]>([])
+  const [versionsOpen, setVersionsOpen] = useState(false)
   const [health, setHealth] = useState<{ alive: number; total: number; results: { name: string; latency: number | null }[] } | null>(null)
+  const [healthOpen, setHealthOpen] = useState(false)
   const [testing, setTesting] = useState(false)
   const [templates, setTemplates] = useState<UITemplate[]>(builtinTemplates())
-  const [showAgent, setShowAgent] = useState(false)
   const [output, setOutput] = useState<string | null>(null)
   const [outputOpen, outputCtl] = useDisclosure(false)
   const [saving, setSaving] = useState(false)
+  const [savedAt, setSavedAt] = useState(profile.updatedAt)
   const [outputLoading, setOutputLoading] = useState(false)
   const [versionsLoading, setVersionsLoading] = useState(false)
   const [rollbackId, setRollbackId] = useState<string | null>(null)
@@ -326,6 +326,11 @@ function ProfileDetail({
   const [templateSaving, setTemplateSaving] = useState(false)
   const [pendingTemplate, setPendingTemplate] = useState<UITemplate | null>(null)
   const [agentReloading, setAgentReloading] = useState(false)
+  const [saveSlot, setSaveSlot] = useState<HTMLElement | null>(null)
+
+  useEffect(() => {
+    setSaveSlot(document.getElementById('sf-save-slot'))
+  }, [])
 
   const isOverride = /\bfunction\s+main\s*\(/.test(script)
   const scriptActive = !!script.trim()
@@ -333,6 +338,30 @@ function ProfileDetail({
   const shareUrl = `${location.origin}/sub/${profile.token}`
   const autoRegion = groups.some((g) => g.autoRegion)
   const setOp = (patch: Partial<OpForm>) => setOpForm((f) => ({ ...f, ...patch }))
+
+  const snapshot = (v: { name: string; target: string; subIds: string[]; opForm: OpForm; groups: ProxyGroupDef[]; rules: string[]; script: string }) =>
+    JSON.stringify(v)
+  const [baseline, setBaseline] = useState(() =>
+    snapshot({ name: profile.name, target: profile.target, subIds: profile.subscriptionIds, opForm: parseOps(profile.profile.operations), groups: profile.profile.groups || [], rules: profile.profile.rules || [], script: profile.script || '' }),
+  )
+  const dirty = useMemo(
+    () => snapshot({ name, target, subIds, opForm, groups, rules, script }) !== baseline,
+    [name, target, subIds, opForm, groups, rules, script, baseline],
+  )
+
+  const applyServerProfile = (p: Profile) => {
+    setName(p.name)
+    setTarget(p.target)
+    setSubIds(p.subscriptionIds)
+    setOpForm(parseOps(p.profile.operations))
+    setGroups(p.profile.groups || [])
+    setRules(p.profile.rules || [])
+    setScript(p.script || '')
+    setSavedAt(p.updatedAt)
+    setBaseline(
+      snapshot({ name: p.name, target: p.target, subIds: p.subscriptionIds, opForm: parseOps(p.profile.operations), groups: p.profile.groups || [], rules: p.profile.rules || [], script: p.script || '' }),
+    )
+  }
 
   const reloadTemplates = () =>
     api
@@ -343,27 +372,24 @@ function ProfileDetail({
     reloadTemplates()
   }, [])
 
-  const reloadFromServer = async () => {
-    if (agentReloading) return
-    setAgentReloading(true)
-    try {
-      const p = await api.getProfile(profile.id)
-      setName(p.name)
-      setTarget(p.target)
-      setSubIds(p.subscriptionIds)
-      setOpForm(parseOps(p.profile.operations))
-      setGroups(p.profile.groups || [])
-      setRules(p.profile.rules || [])
-      setScript(p.script || '')
-      setShowScript(!!p.script)
-      onSaved(p)
-      ok('已根据 Agent 的改动刷新')
-    } catch (e) {
-      fail(e)
-    } finally {
-      setAgentReloading(false)
+  // Agent（右侧抽屉）改动当前配置后，从服务端拉最新状态
+  useEffect(() => {
+    const onAgentChanged = () => {
+      setAgentReloading(true)
+      api
+        .getProfile(profile.id)
+        .then((p) => {
+          applyServerProfile(p)
+          onSaved(p)
+          ok('已根据 Agent 的改动刷新')
+        })
+        .catch(fail)
+        .finally(() => setAgentReloading(false))
     }
-  }
+    window.addEventListener(AGENT_CHANGED_EVENT, onAgentChanged)
+    return () => window.removeEventListener(AGENT_CHANGED_EVENT, onAgentChanged)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.id])
 
   const save = async () => {
     if (saving) return
@@ -372,6 +398,8 @@ function ProfileDetail({
     try {
       const p = await api.updateProfile(profile.id, { name, target, subscriptionIds: subIds, script: script || undefined, profile: profileObj })
       ok('已保存')
+      setSavedAt(p.updatedAt)
+      setBaseline(snapshot({ name, target, subIds, opForm, groups, rules, script }))
       onSaved(p)
     } catch (e) {
       fail(e)
@@ -409,7 +437,6 @@ function ProfileDetail({
     setGroups(structuredClone(t.profile.groups))
     setRules([...t.profile.rules])
     setScript(t.script || '')
-    setShowScript(!!t.script)
     setPendingTemplate(null)
   }
 
@@ -432,6 +459,7 @@ function ProfileDetail({
     setVersionsLoading(true)
     try {
       setVersions(await api.versions(profile.id))
+      setVersionsOpen(true)
     } catch (e) {
       fail(e)
     } finally {
@@ -445,6 +473,8 @@ function ProfileDetail({
     try {
       const p = await api.rollback(profile.id, versionId)
       setVersions([])
+      setVersionsOpen(false)
+      applyServerProfile(p)
       onSaved(p)
       ok('已回滚')
     } catch (e) {
@@ -474,7 +504,10 @@ function ProfileDetail({
     setTesting(true)
     api
       .healthcheck(profile.id)
-      .then(setHealth)
+      .then((h) => {
+        setHealth(h)
+        setHealthOpen(true)
+      })
       .catch((e) => fail(String(e).includes('501') ? '当前部署不支持测活（边缘运行时）' : String(e)))
       .finally(() => setTesting(false))
   }
@@ -504,32 +537,129 @@ function ProfileDetail({
     }
   }
 
+  const visibleGroupCount = groups.filter((g) => !g.autoRegion).length
+  const SECTIONS: { key: Section; label: string; badge: string }[] = [
+    { key: 'nodes', label: '节点处理', badge: '' },
+    { key: 'groups', label: '代理组', badge: visibleGroupCount ? String(visibleGroupCount) : '' },
+    { key: 'rules', label: '分流规则', badge: rules.length ? String(rules.length) : '' },
+    { key: 'script', label: '脚本', badge: scriptActive ? 'on' : '' },
+  ]
+
+  const saveBar = (
+    <Box className="save-bar">
+      {dirty ? (
+        <Text fz={13} fw={500} c="var(--sf-amber)" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+          <Box component="span" style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--sf-amber)' }} />
+          未保存更改
+        </Text>
+      ) : (
+        <Text fz={13} fw={500} c="teal" style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+          <ICheck size={13} />
+          已保存
+        </Text>
+      )}
+      <Text fz={12.5} c="dimmed">
+        上次保存 {fmtClock(savedAt)} · 保存自动建快照
+      </Text>
+      {agentReloading && (
+        <Text fz={12.5} c="dimmed">
+          正在同步 Agent 的改动…
+        </Text>
+      )}
+      <Group gap={8} ml="auto" wrap="nowrap">
+        <NativeSelect
+          size="xs"
+          radius={7}
+          value=""
+          aria-label="套用模板"
+          onChange={(e) => {
+            if (e.currentTarget.value) applyTemplate(e.currentTarget.value)
+          }}
+          data={[{ value: '', label: '从模板开始…' }, ...templates.map((t) => ({ value: t.key, label: `${t.serverId ? '★ ' : ''}${t.label}` }))]}
+          styles={{ input: { height: 34 } }}
+        />
+        <Button variant="subtle" color="gray" h={34} radius={7} px={14} fz={13} loading={versionsLoading} onClick={() => void loadVersions()}>
+          版本历史
+        </Button>
+        <Button variant="default" h={34} radius={7} px={14} fz={13} loading={testing} onClick={runHealth}>
+          {testing ? '测活中…' : '测活'}
+        </Button>
+        <Button variant="default" h={34} radius={7} px={14} fz={13} loading={outputLoading} onClick={() => void viewOutput()}>
+          查看输出
+        </Button>
+        <Button
+          variant="default"
+          h={34}
+          radius={7}
+          px={14}
+          fz={13}
+          onClick={() => {
+            setTemplateName(`${name} 模板`)
+            setTemplateOpen(true)
+          }}
+        >
+          存为模板
+        </Button>
+        <Button h={36} radius={7} px={22} leftSection={<ISave size={15} />} loading={saving} onClick={() => void save()}>
+          保存
+        </Button>
+      </Group>
+    </Box>
+  )
+
   return (
-    <Stack gap="md">
-      {/* 基本信息 + 操作 */}
-      <Card>
-        <Box className="form-grid form-grid-2">
+    <Box>
+      {/* 头部：名称 / 输出格式 / 分享链接 / 更多 */}
+      <Box px={20} pt={16} pb={6}>
+        <Box className="profile-head-grid">
           <TextInput label="名称" value={name} onChange={(e) => setName(e.currentTarget.value)} />
           <NativeSelect label="输出格式" value={target} onChange={(e) => setTarget(e.currentTarget.value)} data={renderers} />
-        </Box>
-        <TextInput
-          mt="sm"
-          label={
-            <Group gap={5} component="span">
-              <ILink size={12} /> 分享链接（凭此订阅，无需口令）
+          <Box>
+            <Text component="label" fz={13} fw={500} c="dimmed" display="block" mb={5}>
+              分享链接（凭此订阅，无需口令）
+            </Text>
+            <Group gap={6} wrap="nowrap">
+              <TextInput
+                readOnly
+                value={shareUrl}
+                onFocus={(e) => e.currentTarget.select()}
+                style={{ flex: 1, minWidth: 0 }}
+                styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)', fontSize: 11.5, background: 'var(--sf-surface-subtle)' } }}
+              />
+              <CopyButton value={shareUrl} timeout={1600}>
+                {({ copied, copy }) => (
+                  <Tooltip label={copied ? '已复制' : '复制'}>
+                    <ActionIcon variant="default" size={36} radius={7} onClick={copy} aria-label="复制分享链接">
+                      {copied ? <ICheck size={15} /> : <ICopy size={15} />}
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+              </CopyButton>
             </Group>
-          }
-          readOnly
-          value={shareUrl}
-          onFocus={(e) => e.currentTarget.select()}
-          styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)', fontSize: 12.5 } }}
-        />
-        <Box mt="sm">
-          <Text fz="sm" fw={500} mb={6}>
+          </Box>
+          <Menu position="bottom-end" width={160}>
+            <Menu.Target>
+              <ActionIcon variant="default" size={36} radius={7} c="dimmed" aria-label="更多操作" style={{ alignSelf: 'end' }}>
+                <IDots size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<IHistory size={14} />} onClick={() => void loadVersions()}>
+                版本历史
+              </Menu.Item>
+              <Menu.Item color="red" leftSection={<ITrash size={14} />} onClick={() => setDeleteOpen(true)}>
+                删除配置
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+        </Box>
+
+        <Group gap={8} mt={14} wrap="wrap">
+          <Text fz={13} fw={500} c="dimmed">
             关联订阅
           </Text>
           {subsLoading ? (
-            <Skeleton h={32} radius={6} />
+            <Skeleton h={26} w={160} radius={100} />
           ) : subsError ? (
             <LoadError message={subsError} onRetry={onRetrySubs} />
           ) : subs.length === 0 ? (
@@ -547,281 +677,169 @@ function ProfileDetail({
               </Group>
             </Chip.Group>
           )}
-        </Box>
-
-        <Box className="profile-actions" mt="md">
-          <Button leftSection={<ISave size={15} />} loading={saving} onClick={() => void save()}>
-            保存
-          </Button>
-          <NativeSelect
-            w="auto"
-            value=""
-            onChange={(e) => {
-              if (e.currentTarget.value) applyTemplate(e.currentTarget.value)
-            }}
-            data={[{ value: '', label: '从模板开始…' }, ...templates.map((t) => ({ value: t.key, label: `${t.serverId ? '★ ' : ''}${t.label}` }))]}
-          />
-          <Button
-            variant="default"
-            leftSection={<ITemplate size={14} />}
-            onClick={() => {
-              setTemplateName(`${name} 模板`)
-              setTemplateOpen(true)
-            }}
-          >
-            存为模板
-          </Button>
-          <Button variant="default" leftSection={<IPlay size={14} />} loading={outputLoading} onClick={() => void viewOutput()}>
-            查看输出
-          </Button>
-          <Button
-            variant="default"
-            leftSection={<IHistory size={14} />}
-            loading={versionsLoading}
-            onClick={() => void loadVersions()}
-          >
-            版本
-          </Button>
-          <Button variant="default" leftSection={<IZap size={14} />} loading={testing} onClick={runHealth}>
-            {testing ? '测活中…' : '测活'}
-          </Button>
-          <Button
-            variant={showAgent ? 'filled' : 'light'}
-            leftSection={<IBot size={14} />}
-            onClick={() => setShowAgent((v) => !v)}
-          >
-            Agent
-          </Button>
-          <ActionIcon size="lg" variant="subtle" color="red" onClick={() => setDeleteOpen(true)} aria-label={`删除配置 ${name}`}>
-            <ITrash size={15} />
-          </ActionIcon>
-        </Box>
-
-        {versions.length > 0 && (
-          <Box mt="md">
-            <Text fz="sm" fw={500} mb={6}>
-              版本历史
-            </Text>
-            <Stack gap={4}>
-              {versions.map((v) => (
-                <Group key={v.id} justify="space-between" wrap="wrap">
-                  <Text fz={12} c="dimmed">
-                    {new Date(v.createdAt).toLocaleString()} — {v.note || '快照'}
-                  </Text>
-                  <Button
-                    size="compact-xs"
-                    variant="subtle"
-                    loading={rollbackId === v.id}
-                    disabled={rollbackId !== null && rollbackId !== v.id}
-                    onClick={() => void rollback(v.id)}
-                  >
-                    回滚
-                  </Button>
-                </Group>
-              ))}
-            </Stack>
-          </Box>
-        )}
-        {health && (
-          <Box mt="md">
-            <Text fz="sm" fw={500} mb={6}>
-              存活 {health.alive} / {health.total}（按延迟排序）
-            </Text>
-            <Group gap={6} style={{ maxHeight: 160, overflow: 'auto' }}>
-              {health.results
-                .slice()
-                .sort((a, b) => (a.latency ?? 99999) - (b.latency ?? 99999))
-                .map((r, i) => (
-                  <Badge key={i} variant="light" color={r.latency === null ? 'red' : 'gray'} tt="none" fw={500}>
-                    {r.name} · {r.latency === null ? '超时' : `${r.latency}ms`}
-                  </Badge>
-                ))}
-            </Group>
-          </Box>
-        )}
-      </Card>
-
-      {/* Agent 面板 */}
-      {showAgent && (
-        <Card style={{ borderColor: 'var(--mantine-color-violet-3)' }}>
-          <CardHead>
-            <IBot size={15} />
-            <Text fw={600}>Agent · 对话即改当前配置</Text>
-          </CardHead>
-          <Text c="dimmed" fz="sm" mb="sm">
-            例：「香港节点单独分组、按延迟测速」「加一条 Netflix 分流」「把当前配置存成模板，叫 家用」「套用模板 家用」。改完自动刷新。
-          </Text>
-          <AgentChatPanel
-            threadId={`profile:${profile.id}`}
-            hasAgent={hasAgent}
-            onChanged={reloadFromServer}
-            height={300}
-            context={`用户正在编辑配置：id=${profile.id}，name=「${name}」。除非明确指定其它档，所有 read/write/preview/validate/save_template/apply_template 操作都针对这个档（profileId=${profile.id}）。`}
-          />
-          {agentReloading && <Text c="dimmed" fz="xs" mt="xs">正在同步 Agent 的改动…</Text>}
-        </Card>
-      )}
-
-      {groupsRulesIgnored && (
-        <Card style={{ borderColor: 'var(--mantine-color-violet-3)' }}>
-          <Badge variant="light" color="violet">
-            override 模式
-          </Badge>
-          <Text c="dimmed" fz="sm" mt={6}>
-            「代理组 / 规则」由脚本 <span className="mono">main(config)</span> 生成，此处忽略；但「节点处理」仍在脚本前生效，可共存。
-          </Text>
-        </Card>
-      )}
-
-      {/* ① 节点处理 */}
-      <Card>
-        <CardHead right={<DimIcon><ISliders size={15} /></DimIcon>}>
-          <StepNum n={1} />
-          <Text fw={600}>
-            节点处理
-            {groupsRulesIgnored && (
-              <Text span c="dimmed" fw={400} fz="sm">
-                {' '}
-                · 脚本前生效
-              </Text>
-            )}
-          </Text>
-        </CardHead>
-        <Group mb="sm" gap="lg">
-          <Checkbox label="去重" checked={opForm.dedupe} onChange={(e) => setOp({ dedupe: e.currentTarget.checked })} />
-          <Checkbox label="地区打标签" checked={opForm.tagRegions} onChange={(e) => setOp({ tagRegions: e.currentTarget.checked })} />
-          <Checkbox label="按名称排序" checked={opForm.sortByName} onChange={(e) => setOp({ sortByName: e.currentTarget.checked })} />
         </Group>
-        <Box className="form-grid form-grid-2">
-          <TextInput label="剔除节点（正则）" placeholder="过期|剩余|官网|流量" value={opForm.dropPattern} onChange={(e) => setOp({ dropPattern: e.currentTarget.value })} />
-          <TextInput label="只保留节点（正则）" placeholder="留空 = 不限" value={opForm.keepPattern} onChange={(e) => setOp({ keepPattern: e.currentTarget.value })} />
-        </Box>
-        <Box className="form-grid form-grid-2" mt="sm">
-          <TextInput label="重命名 · 匹配（正则）" value={opForm.renameFrom} onChange={(e) => setOp({ renameFrom: e.currentTarget.value })} />
-          <TextInput label="重命名 · 替换为" value={opForm.renameTo} onChange={(e) => setOp({ renameTo: e.currentTarget.value })} />
-        </Box>
-      </Card>
+      </Box>
 
-      {/* ② 代理组 */}
-      <Card className={groupsRulesIgnored ? 'config-section-disabled' : undefined} aria-disabled={groupsRulesIgnored}>
-        <CardHead right={<DimIcon><IGlobe size={15} /></DimIcon>}>
-          <StepNum n={2} />
-          <Text fw={600}>代理组</Text>
-        </CardHead>
-        <Group mb="sm" justify="space-between">
-          <Checkbox
-            label="地区自动分组（按节点生成 HK/US/JP… 测速组）"
-            checked={autoRegion}
-            disabled={groupsRulesIgnored}
-            onChange={toggleAutoRegion}
-          />
-          <Group gap={6}>
-            <Button size="compact-sm" variant="default" disabled={groupsRulesIgnored} leftSection={<IPlus size={13} />} onClick={() => addCommon(COMMON_GROUPS.select)}>
-              节点选择
-            </Button>
-            <Button size="compact-sm" variant="default" disabled={groupsRulesIgnored} leftSection={<IPlus size={13} />} onClick={() => addCommon(COMMON_GROUPS.autoSelect)}>
-              自动选择
-            </Button>
-            <Button size="compact-sm" variant="default" disabled={groupsRulesIgnored} leftSection={<IPlus size={13} />} onClick={() => setGroups((gs) => [...gs, { name: '新组', type: 'select', includeAll: true }])}>
-              空白组
-            </Button>
-          </Group>
-        </Group>
-        <Stack gap={8}>
-          {groups
-            .filter((g) => !g.autoRegion)
-            .map((g) => {
-              const idx = groups.indexOf(g)
-              return (
-                <Box key={idx} className="proxy-group-editor">
-                  <Box className="proxy-group-main">
-                    <TextInput label="组名" disabled={groupsRulesIgnored} value={g.name} onChange={(e) => updateGroup(idx, { name: e.currentTarget.value })} />
-                    <NativeSelect
-                      label="类型"
-                      disabled={groupsRulesIgnored}
-                      value={g.type}
-                      onChange={(e) => updateGroup(idx, { type: e.currentTarget.value as ProxyGroupDef['type'] })}
-                      data={['select', 'url-test', 'fallback', 'load-balance']}
-                    />
-                    <Checkbox className="proxy-group-checkbox" label="全部节点" disabled={groupsRulesIgnored} checked={!!g.includeAll} onChange={(e) => updateGroup(idx, { includeAll: e.currentTarget.checked })} />
-                    <ActionIcon className="proxy-group-delete" variant="subtle" color="red" disabled={groupsRulesIgnored} onClick={() => delGroup(idx)} aria-label={`删除代理组 ${g.name}`}>
-                      <ITrash size={14} />
-                    </ActionIcon>
-                  </Box>
-                  <Box className="form-grid form-grid-2" mt="sm">
-                    <TextInput label="包含过滤（正则，可选）" disabled={groupsRulesIgnored} value={g.filter || ''} onChange={(e) => updateGroup(idx, { filter: e.currentTarget.value })} />
-                    <TextInput label="排除过滤（正则，可选）" disabled={groupsRulesIgnored} value={g.excludeFilter || ''} onChange={(e) => updateGroup(idx, { excludeFilter: e.currentTarget.value })} />
-                  </Box>
-                </Box>
-              )
-            })}
-        </Stack>
-        {autoRegion && (
-          <Text c="dimmed" fz="sm" mt={8}>
-            ✓ 地区组会在生成时按节点自动展开。
-          </Text>
-        )}
-      </Card>
-
-      {/* ③ 分流规则 */}
-      <Card className={groupsRulesIgnored ? 'config-section-disabled' : undefined} aria-disabled={groupsRulesIgnored}>
-        <CardHead right={<DimIcon><IFilter size={15} /></DimIcon>}>
-          <StepNum n={3} />
-          <Text fw={600}>分流规则</Text>
-        </CardHead>
-        <Text fz="sm" fw={500} mb={6}>
-          分流预设（勾选自动加分组 + 规则）
-        </Text>
-        <Group gap={8} mb="sm">
-          {RULE_PRESETS.map((p) => (
-            <Chip key={p.key} checked={presetOn(p.rules)} disabled={groupsRulesIgnored} onChange={() => togglePreset(p.key)} variant="light" size="sm">
-              {p.label}
-            </Chip>
+      {/* 区块 tab */}
+      <Group justify="space-between" gap={14} px={12} mt={10} wrap="nowrap" className="section-tabs">
+        <Group gap={0} wrap="nowrap">
+          {SECTIONS.map((s) => (
+            <UnstyledButton
+              key={s.key}
+              className="section-tab"
+              data-active={section === s.key || undefined}
+              onClick={() => setSection(s.key)}
+            >
+              {s.label}
+              {s.badge && <span className="section-tab-badge">{s.badge}</span>}
+            </UnstyledButton>
           ))}
         </Group>
-        <Text fz="sm" fw={500} mb={6}>
-          规则列表（每行一条，末行一般 MATCH 兜底）
-        </Text>
-        <Textarea
-          rows={8}
-          disabled={groupsRulesIgnored}
-          value={rules.join('\n')}
-          onChange={(e) => setRules(e.currentTarget.value.split('\n').map((s) => s.trim()).filter(Boolean))}
-          styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)', fontSize: 12.5 } }}
-        />
-      </Card>
+        {scriptActive && (
+          <Text fz={12.5} fw={500} className="script-pill" title={groupsRulesIgnored ? '脚本 main(config) 覆写输出，代理组 / 规则由脚本决定' : '脚本以 transform 模式变换节点'}>
+            <IAlert size={13} />
+            {groupsRulesIgnored ? '脚本已启用 · 覆盖表单' : '脚本已启用 · transform'}
+          </Text>
+        )}
+      </Group>
 
-      {/* ④ 脚本 */}
-      <Card>
-        <CardHead
-          right={
-            <Button size="compact-sm" variant="subtle" leftSection={<ICode size={14} />} onClick={() => setShowScript((v) => !v)}>
-              {showScript ? '收起' : '展开'}
-            </Button>
-          }
-        >
-          <StepNum n={4} />
-          <Text fw={600}>自定义脚本</Text>
-          {scriptActive && (
-            <Badge variant="light" color="violet">
-              {isOverride ? 'override' : 'transform'}
-            </Badge>
+      {/* 节点处理 */}
+      {section === 'nodes' && (
+        <Box px={20} py={16}>
+          <Group mb={14} gap={20}>
+            <Checkbox label="去重" checked={opForm.dedupe} onChange={(e) => setOp({ dedupe: e.currentTarget.checked })} />
+            <Checkbox label="地区打标签" checked={opForm.tagRegions} onChange={(e) => setOp({ tagRegions: e.currentTarget.checked })} />
+            <Checkbox label="按名称排序" checked={opForm.sortByName} onChange={(e) => setOp({ sortByName: e.currentTarget.checked })} />
+          </Group>
+          <Box className="form-grid form-grid-2">
+            <TextInput label="剔除节点（正则）" placeholder="过期|剩余|官网|流量" value={opForm.dropPattern} onChange={(e) => setOp({ dropPattern: e.currentTarget.value })} />
+            <TextInput label="只保留节点（正则）" placeholder="留空 = 不限" value={opForm.keepPattern} onChange={(e) => setOp({ keepPattern: e.currentTarget.value })} />
+            <TextInput label="重命名 · 匹配（正则）" value={opForm.renameFrom} onChange={(e) => setOp({ renameFrom: e.currentTarget.value })} />
+            <TextInput label="重命名 · 替换为" value={opForm.renameTo} onChange={(e) => setOp({ renameTo: e.currentTarget.value })} />
+          </Box>
+          {groupsRulesIgnored && (
+            <Text c="dimmed" fz="sm" mt={12}>
+              节点处理在脚本之前生效，可与 override 脚本共存。
+            </Text>
           )}
-        </CardHead>
-        <Text c="dimmed" fz="sm">
-          留空则用上面的表单；写代码可完全自定义（<span className="mono">return nodes</span> 变换，或{' '}
-          <span className="mono">function main(config)</span> 覆写）。
-        </Text>
-        <Collapse in={showScript}>
-          {showScript && (
-            <Box mt="sm">
-              <Suspense fallback={<DetailSkeleton />}>
-                <ScriptEditor profileId={profile.id} value={script} onChange={setScript} dts={dts} />
-              </Suspense>
-            </Box>
+        </Box>
+      )}
+
+      {/* 代理组 */}
+      {section === 'groups' && (
+        <Box px={20} py={16}>
+          <Group justify="space-between" gap={12} mb={12} wrap="wrap">
+            <Checkbox
+              label="地区自动分组（按节点生成 HK/US/JP… 测速组）"
+              checked={autoRegion}
+              disabled={groupsRulesIgnored}
+              onChange={toggleAutoRegion}
+            />
+            <Group gap={6}>
+              <Button size="compact-sm" variant="light" color="gray" disabled={groupsRulesIgnored} onClick={() => addCommon(COMMON_GROUPS.select)}>
+                + 节点选择
+              </Button>
+              <Button size="compact-sm" variant="light" color="gray" disabled={groupsRulesIgnored} onClick={() => addCommon(COMMON_GROUPS.autoSelect)}>
+                + 自动选择
+              </Button>
+              <Button size="compact-sm" variant="light" color="gray" disabled={groupsRulesIgnored} onClick={() => setGroups((gs) => [...gs, { name: '新组', type: 'select', includeAll: true }])}>
+                + 空白组
+              </Button>
+            </Group>
+          </Group>
+          <Stack gap={8}>
+            {groups
+              .filter((g) => !g.autoRegion)
+              .map((g) => {
+                const idx = groups.indexOf(g)
+                return (
+                  <Box key={idx} className="proxy-group-editor">
+                    <Box className="proxy-group-main">
+                      <TextInput label="组名" disabled={groupsRulesIgnored} value={g.name} onChange={(e) => updateGroup(idx, { name: e.currentTarget.value })} />
+                      <NativeSelect
+                        label="类型"
+                        disabled={groupsRulesIgnored}
+                        value={g.type}
+                        onChange={(e) => updateGroup(idx, { type: e.currentTarget.value as ProxyGroupDef['type'] })}
+                        data={['select', 'url-test', 'fallback', 'load-balance']}
+                      />
+                      <Checkbox className="proxy-group-checkbox" label="全部节点" disabled={groupsRulesIgnored} checked={!!g.includeAll} onChange={(e) => updateGroup(idx, { includeAll: e.currentTarget.checked })} />
+                      <ActionIcon className="proxy-group-delete" variant="subtle" color="red" disabled={groupsRulesIgnored} onClick={() => delGroup(idx)} aria-label={`删除代理组 ${g.name}`}>
+                        <ITrash size={14} />
+                      </ActionIcon>
+                    </Box>
+                    <Box className="form-grid form-grid-2" mt="sm">
+                      <TextInput label="包含过滤（正则，可选）" disabled={groupsRulesIgnored} value={g.filter || ''} onChange={(e) => updateGroup(idx, { filter: e.currentTarget.value })} />
+                      <TextInput label="排除过滤（正则，可选）" disabled={groupsRulesIgnored} value={g.excludeFilter || ''} onChange={(e) => updateGroup(idx, { excludeFilter: e.currentTarget.value })} />
+                    </Box>
+                  </Box>
+                )
+              })}
+          </Stack>
+          {autoRegion && (
+            <Text c="dimmed" fz={12.5} mt={8}>
+              地区组会在生成时按节点自动展开。
+            </Text>
           )}
-        </Collapse>
-      </Card>
+          {groupsRulesIgnored && (
+            <Text c="dimmed" fz="sm" mt={12}>
+              override 模式下代理组由脚本 <span className="mono">main(config)</span> 生成，此处忽略。
+            </Text>
+          )}
+        </Box>
+      )}
+
+      {/* 分流规则 */}
+      {section === 'rules' && (
+        <Box px={20} py={16}>
+          <Text fz={13} fw={500} c="dimmed" mb={8}>
+            分流预设（勾选自动加分组 + 规则）
+          </Text>
+          <Group gap={8} mb={14}>
+            {RULE_PRESETS.map((p) => (
+              <Chip key={p.key} checked={presetOn(p.rules)} disabled={groupsRulesIgnored} onChange={() => togglePreset(p.key)} variant="light" size="sm">
+                {p.label}
+              </Chip>
+            ))}
+          </Group>
+          <Text fz={13} fw={500} c="dimmed" mb={8}>
+            规则列表（每行一条，末行一般 MATCH 兜底）
+          </Text>
+          <Textarea
+            rows={8}
+            disabled={groupsRulesIgnored}
+            value={rules.join('\n')}
+            onChange={(e) => setRules(e.currentTarget.value.split('\n').map((s) => s.trim()).filter(Boolean))}
+            styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)', fontSize: 12.5, background: 'var(--sf-surface-subtle)' } }}
+          />
+          {groupsRulesIgnored && (
+            <Text c="dimmed" fz="sm" mt={12}>
+              override 模式下规则由脚本 <span className="mono">main(config)</span> 生成，此处忽略。
+            </Text>
+          )}
+        </Box>
+      )}
+
+      {/* 脚本 */}
+      {section === 'script' && (
+        <Box px={20} py={16}>
+          <Text c="dimmed" fz={13} mb={12}>
+            留空则用表单；写代码可完全自定义（<span className="mono">return nodes</span> 变换，或{' '}
+            <span className="mono">function main(config)</span> 覆写）。
+            {scriptActive && (
+              <Badge variant="light" color="violet" ml={8}>
+                {isOverride ? 'override' : 'transform'}
+              </Badge>
+            )}
+          </Text>
+          <Suspense fallback={<DetailSkeleton />}>
+            <ScriptEditor profileId={profile.id} value={script} onChange={setScript} dts={dts} />
+          </Suspense>
+        </Box>
+      )}
+
+      {/* 吸底保存栏（portal 到主列底部） */}
+      {saveSlot && createPortal(saveBar, saveSlot)}
 
       <Modal opened={templateOpen} onClose={() => !templateSaving && setTemplateOpen(false)} title="存为模板" centered>
         <TextInput
@@ -843,15 +861,60 @@ function ProfileDetail({
       </Modal>
 
       <Modal opened={!!pendingTemplate} onClose={() => setPendingTemplate(null)} title="套用模板" centered>
-        <Text fz="sm">
-          套用模板“{pendingTemplate?.label}”会替换当前尚未保存的节点处理、代理组、规则和脚本。
-        </Text>
+        <Text fz="sm">套用模板“{pendingTemplate?.label}”会替换当前尚未保存的节点处理、代理组、规则和脚本。</Text>
         <Group justify="flex-end" mt="lg">
           <Button variant="default" data-autofocus onClick={() => setPendingTemplate(null)}>
             取消
           </Button>
           <Button onClick={confirmApplyTemplate}>套用</Button>
         </Group>
+      </Modal>
+
+      <Modal opened={versionsOpen} onClose={() => setVersionsOpen(false)} title="版本历史" centered>
+        {versions.length === 0 ? (
+          <Text c="dimmed" fz="sm">
+            还没有快照，保存一次即可生成。
+          </Text>
+        ) : (
+          <Stack gap={4}>
+            {versions.map((v) => (
+              <Group key={v.id} justify="space-between" wrap="wrap">
+                <Text fz={12} c="dimmed">
+                  {new Date(v.createdAt).toLocaleString()} — {v.note || '快照'}
+                </Text>
+                <Button
+                  size="compact-xs"
+                  variant="subtle"
+                  loading={rollbackId === v.id}
+                  disabled={rollbackId !== null && rollbackId !== v.id}
+                  onClick={() => void rollback(v.id)}
+                >
+                  回滚
+                </Button>
+              </Group>
+            ))}
+          </Stack>
+        )}
+      </Modal>
+
+      <Modal opened={healthOpen} onClose={() => setHealthOpen(false)} title="节点测活" centered>
+        {health && (
+          <>
+            <Text fz="sm" fw={500} mb={8}>
+              存活 {health.alive} / {health.total}（按延迟排序）
+            </Text>
+            <Group gap={6} style={{ maxHeight: 280, overflow: 'auto' }}>
+              {health.results
+                .slice()
+                .sort((a, b) => (a.latency ?? 99999) - (b.latency ?? 99999))
+                .map((r, i) => (
+                  <Badge key={i} variant="light" color={r.latency === null ? 'red' : 'gray'} tt="none" fw={500}>
+                    {r.name} · {r.latency === null ? '超时' : `${r.latency}ms`}
+                  </Badge>
+                ))}
+            </Group>
+          </>
+        )}
       </Modal>
 
       <Modal
@@ -878,6 +941,6 @@ function ProfileDetail({
           {output}
         </Code>
       </Modal>
-    </Stack>
+    </Box>
   )
 }

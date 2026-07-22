@@ -1,44 +1,43 @@
 import {
   ActionIcon,
-  AppShell,
   Box,
-  Burger,
   Button,
   Card,
   Group,
-  NavLink,
   PasswordInput,
-  Stack,
   Text,
   Title,
   Tooltip,
+  UnstyledButton,
   useMantineColorScheme,
 } from '@mantine/core'
 import { useEffect, useState } from 'react'
 import { api, getToken, setToken } from './api'
-import { Agent } from './components/Agent'
+import { AgentChatPanel } from './components/AgentChatPanel'
 import { LoadError, PageSkeleton } from './components/AsyncState'
 import { Mcp } from './components/Mcp'
 import { Profiles } from './components/Profiles'
 import { Subscriptions } from './components/Subscriptions'
-import { IBrand, ILayers, IMoon, IPlug, IRss, ISparkles, ISun } from './icons'
+import { IBrand, IMoon, IPlus, ISparkles, ISun, IX } from './icons'
 import { readView, writeView, type View } from './navigation'
 import type { Meta } from './types'
 
-const TABS: { key: View; label: string; title: string; sub: string; icon: typeof IRss }[] = [
-  { key: 'subs', label: '订阅', title: '订阅', sub: '添加机场订阅或手工节点，SubForge 会抓取并解析。', icon: IRss },
-  { key: 'profiles', label: '配置', title: '配置', sub: '把订阅按你的规则转成可用配置，用分享链接分发。', icon: ILayers },
-  { key: 'agent', label: 'Agent', title: 'Agent', sub: '用对话调整配置、写脚本、管理模板。', icon: ISparkles },
-  { key: 'mcp', label: 'MCP', title: 'MCP', sub: '管理外部 Agent 的远端连接与工具访问。', icon: IPlug },
+const TABS: { key: View; label: string; title: string; sub: string }[] = [
+  { key: 'subs', label: '订阅', title: '订阅', sub: '添加机场订阅或手工节点，SubForge 会抓取并解析。' },
+  { key: 'profiles', label: '配置', title: '配置', sub: '把订阅按你的规则转成可用配置，用分享链接分发。' },
+  { key: 'mcp', label: 'MCP', title: 'MCP', sub: '管理外部 Agent 的远端连接与工具访问。' },
 ]
+
+/** ProfileDetail 通过该事件通知「Agent 改动了当前配置」，抽屉与详情面板解耦。 */
+export const AGENT_CHANGED_EVENT = 'subforge:agent-changed'
 
 function ThemeToggle() {
   const { colorScheme, toggleColorScheme } = useMantineColorScheme()
   const dark = colorScheme === 'dark'
   return (
-    <Tooltip label={dark ? '切换到浅色' : '切换到暗色'} position="right">
-      <ActionIcon variant="default" size="lg" radius="md" onClick={toggleColorScheme} aria-label="切换主题">
-        {dark ? <ISun size={17} /> : <IMoon size={17} />}
+    <Tooltip label={dark ? '切换到浅色' : '切换到暗色'}>
+      <ActionIcon variant="default" size={34} radius={7} onClick={toggleColorScheme} aria-label="切换主题">
+        {dark ? <ISun size={15} /> : <IMoon size={15} />}
       </ActionIcon>
     </Tooltip>
   )
@@ -46,12 +45,12 @@ function ThemeToggle() {
 
 function Brand() {
   return (
-    <Group gap={10} px={6} py={4}>
+    <Group gap={10} wrap="nowrap">
       <Box
         style={{
-          width: 30,
-          height: 30,
-          borderRadius: 8,
+          width: 28,
+          height: 28,
+          borderRadius: 7,
           background: 'linear-gradient(135deg,#8b5cf6,#7c3aed)',
           display: 'grid',
           placeItems: 'center',
@@ -59,9 +58,9 @@ function Brand() {
           boxShadow: '0 2px 8px rgba(124,58,237,.35)',
         }}
       >
-        <IBrand size={17} />
+        <IBrand size={15} />
       </Box>
-      <Text fw={600} fz={15.5}>
+      <Text fw={600} fz={15} style={{ whiteSpace: 'nowrap' }}>
         Sub
         <Text span c="dimmed" fw={500}>
           Forge
@@ -73,12 +72,15 @@ function Brand() {
 
 export function App() {
   const [tab, setTab] = useState<View>(() => readView(window.location.search))
-  const [navOpened, setNavOpened] = useState(false)
   const [meta, setMeta] = useState<Meta | null>(null)
   const [metaStatus, setMetaStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [metaError, setMetaError] = useState('')
   const [needToken, setNeedToken] = useState(false)
   const [tokenInput, setTokenInput] = useState(getToken())
+  const [agentOpen, setAgentOpen] = useState(false)
+  const [subsAddOpen, setSubsAddOpen] = useState(false)
+  // 配置页当前选中的档，用于 Agent 抽屉的上下文切换
+  const [profileCtx, setProfileCtx] = useState<{ id: string; name: string } | null>(null)
 
   const loadMeta = () => {
     setMetaStatus('loading')
@@ -115,7 +117,6 @@ export function App() {
       window.history.pushState(null, '', `${window.location.pathname}${search}${window.location.hash}`)
       setTab(next)
     }
-    setNavOpened(false)
   }
 
   if (needToken) {
@@ -156,93 +157,144 @@ export function App() {
   }
 
   const cur = TABS.find((t) => t.key === tab)!
+  const pageTitle = tab === 'profiles' && profileCtx ? `配置 · ${profileCtx.name}` : cur.title
+  const agentProfile = tab === 'profiles' ? profileCtx : null
 
   return (
-    <AppShell
-      header={{ height: { base: 56, sm: 0 } }}
-      navbar={{ width: 236, breakpoint: 'sm', collapsed: { mobile: !navOpened } }}
-      padding={0}
-    >
-      <AppShell.Header hiddenFrom="sm" style={{ borderColor: 'var(--sf-border-subtle)' }}>
-        <Group h="100%" px="md" gap="sm">
-          <Burger opened={navOpened} onClick={() => setNavOpened((value) => !value)} size="sm" aria-label="切换导航" />
+    <Box style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+      {/* 顶栏导航 */}
+      <Box component="header" className="topbar">
+        <Box className="topbar-brand">
           <Brand />
+        </Box>
+        <nav className="topbar-nav" aria-label="主导航">
+          {TABS.map((t) => (
+            <UnstyledButton
+              key={t.key}
+              component="a"
+              className="topbar-tab"
+              data-active={tab === t.key || undefined}
+              aria-current={tab === t.key ? 'page' : undefined}
+              href={`${window.location.pathname}${writeView(window.location.search, t.key)}${window.location.hash}`}
+              onClick={(event: React.MouseEvent) => {
+                event.preventDefault()
+                selectTab(t.key)
+              }}
+            >
+              {t.label}
+            </UnstyledButton>
+          ))}
+        </nav>
+        <Group gap={12} ml="auto" wrap="nowrap">
+          <Text fz={12} c="dimmed" className="topbar-status">
+            <Box
+              component="span"
+              mr={7}
+              style={{
+                display: 'inline-block',
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: meta?.hasAgent ? 'var(--mantine-color-teal-6)' : 'var(--mantine-color-gray-5)',
+              }}
+            />
+            Agent {meta?.hasAgent ? '已就绪' : '未配置'}
+            {meta ? ` · ${meta.renderers.join(' / ')}` : ''}
+          </Text>
+          <ThemeToggle />
+          <Button
+            variant={agentOpen ? 'filled' : 'light'}
+            h={34}
+            radius={7}
+            px={16}
+            leftSection={<ISparkles size={14} />}
+            onClick={() => setAgentOpen((v) => !v)}
+            aria-pressed={agentOpen}
+          >
+            Agent
+          </Button>
         </Group>
-      </AppShell.Header>
-      <AppShell.Navbar p="sm" style={{ borderColor: 'var(--sf-border-subtle)' }}>
-        <Box visibleFrom="sm">
-          <Brand />
-        </Box>
-        <Stack gap={2} mt="xs">
-          {TABS.map((t) => {
-            const Icon = t.icon
-            return (
-              <NavLink
-                key={t.key}
-                active={tab === t.key}
-                label={t.label}
-                leftSection={<Icon size={17} />}
-                href={`${window.location.pathname}${writeView(window.location.search, t.key)}${window.location.hash}`}
-                onClick={(event) => {
-                  event.preventDefault()
-                  selectTab(t.key)
-                }}
-                variant="light"
-                style={{ borderRadius: 7, fontWeight: 500 }}
-              />
-            )
-          })}
-        </Stack>
-        <Box mt="auto" pt="sm" style={{ borderTop: '1px solid var(--sf-border-subtle)' }}>
-          <Group justify="space-between" align="center" wrap="nowrap">
-            <Stack gap={4}>
-              <Text fz={12} c="dimmed">
-                <Box
-                  component="span"
-                  mr={7}
-                  style={{
-                    display: 'inline-block',
-                    width: 7,
-                    height: 7,
-                    borderRadius: '50%',
-                    background: meta?.hasAgent ? 'var(--mantine-color-teal-6)' : 'var(--mantine-color-gray-5)',
-                  }}
-                />
-                Agent {meta?.hasAgent ? '已就绪' : '未配置'}
-              </Text>
-              <Text fz={12} c="dimmed">
-                {meta ? `输出 · ${meta.renderers.join(' / ')}` : '连接中…'}
-              </Text>
-            </Stack>
-            <ThemeToggle />
-          </Group>
-        </Box>
-      </AppShell.Navbar>
+      </Box>
 
-      <AppShell.Main id="main-content">
-        <Box px={{ base: 16, sm: 32 }} py={{ base: 20, sm: 24 }} style={{ maxWidth: 1240 }}>
-          <Box mb={20}>
-            <Title order={1} fz={22} fw={600}>
-              {cur.title}
-            </Title>
-            <Text c="dimmed" fz="sm" mt={3}>
-              {cur.sub}
-            </Text>
+      <Box style={{ display: 'flex', flex: 1, alignItems: 'stretch' }}>
+        {/* 主内容列 */}
+        <Box style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+          <Group justify="space-between" align="flex-end" gap={16} px={28} pt={22} className="page-head">
+            <Box>
+              <Title order={1} fz={21} fw={600}>
+                {pageTitle}
+              </Title>
+              <Text c="dimmed" fz={13.5} mt={2}>
+                {cur.sub}
+              </Text>
+            </Box>
+            {tab === 'subs' && (
+              <Button h={36} radius={7} px={18} leftSection={<IPlus size={15} />} onClick={() => setSubsAddOpen(true)}>
+                新增订阅
+              </Button>
+            )}
+          </Group>
+
+          <Box className="page-body" style={{ flex: 1 }}>
+            {metaStatus === 'loading' && <PageSkeleton />}
+            {metaStatus === 'error' && <LoadError message={metaError || '无法读取实例信息。'} onRetry={loadMeta} />}
+            {metaStatus === 'success' && meta && (
+              <>
+                {tab === 'subs' && <Subscriptions addOpened={subsAddOpen} onAddClose={() => setSubsAddOpen(false)} />}
+                {tab === 'profiles' && (
+                  <Profiles
+                    dts={meta.scriptDts}
+                    renderers={meta.renderers}
+                    onSelectionChange={setProfileCtx}
+                  />
+                )}
+                {tab === 'mcp' && <Mcp meta={meta.mcp} />}
+              </>
+            )}
           </Box>
-          {metaStatus === 'loading' && <PageSkeleton />}
-          {metaStatus === 'error' && <LoadError message={metaError || '无法读取实例信息。'} onRetry={loadMeta} />}
-          {metaStatus === 'success' && meta && (
-            <>
-              {tab === 'subs' && <Subscriptions />}
-              {tab === 'profiles' && (
-                <Profiles dts={meta.scriptDts} renderers={meta.renderers} hasAgent={!!meta.hasAgent} />
-              )}
-              {tab === 'agent' && <Agent hasAgent={!!meta.hasAgent} />}
-              {tab === 'mcp' && <Mcp meta={meta.mcp} />}
-            </>
-          )}
+
+          {/* 配置页吸底保存栏经 portal 渲染到这里 */}
+          <div id="sf-save-slot" className="save-slot" />
         </Box>
-      </AppShell.Main>
-    </AppShell>
+
+        {/* Agent 抽屉 */}
+        {agentOpen && (
+          <Box component="aside" className="agent-drawer" aria-label="Agent 对话">
+            <Group justify="space-between" align="flex-start" px={16} py={14} className="agent-drawer-head" wrap="nowrap">
+              <Box>
+                <Group gap={7} wrap="nowrap">
+                  <Box c="violet" style={{ display: 'flex' }}>
+                    <ISparkles size={15} />
+                  </Box>
+                  <Text fw={600} fz={14}>
+                    Agent
+                  </Text>
+                </Group>
+                <Text fz={12} c="dimmed" mt={2}>
+                  上下文：{agentProfile ? `配置「${agentProfile.name}」` : '全局'}
+                </Text>
+              </Box>
+              <ActionIcon variant="subtle" color="gray" size={30} radius={7} onClick={() => setAgentOpen(false)} aria-label="关闭 Agent 面板">
+                <IX size={15} />
+              </ActionIcon>
+            </Group>
+            <Box px={14} pb={12} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <AgentChatPanel
+                key={agentProfile ? `profile:${agentProfile.id}` : 'global'}
+                threadId={agentProfile ? `profile:${agentProfile.id}` : 'global'}
+                hasAgent={!!meta?.hasAgent}
+                onChanged={() => window.dispatchEvent(new CustomEvent(AGENT_CHANGED_EVENT))}
+                context={
+                  agentProfile
+                    ? `用户正在编辑配置：id=${agentProfile.id}，name=「${agentProfile.name}」。除非明确指定其它档，所有 read/write/preview/validate/save_template/apply_template 操作都针对这个档（profileId=${agentProfile.id}）。`
+                    : undefined
+                }
+                placeholder="描述你想做的调整…"
+              />
+            </Box>
+          </Box>
+        )}
+      </Box>
+    </Box>
   )
 }

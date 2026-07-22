@@ -35,3 +35,7 @@ export const IMoon = (p: IP) => <S {...p}><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1
 export const IPlug = (p: IP) => <S {...p}><path d="M12 22v-5" /><path d="M9 8V2" /><path d="M15 8V2" /><path d="M18 8v5a6 6 0 0 1-12 0V8Z" /></S>
 export const ICopy = (p: IP) => <S {...p}><rect width="14" height="14" x="8" y="8" rx="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></S>
 export const ICheck = (p: IP) => <S {...p}><path d="m20 6-11 11-5-5" /></S>
+export const ISearch = (p: IP) => <S {...p}><circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" /></S>
+export const IDots = (p: IP) => <S {...p}><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></S>
+export const IX = (p: IP) => <S {...p}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></S>
+export const IAlert = (p: IP) => <S {...p}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4" /><path d="M12 17h.01" /></S>
