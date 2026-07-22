@@ -69,7 +69,7 @@ export function Subscriptions() {
                   style={{ borderRadius: 10, border: '1px solid var(--mantine-color-default-border)' }}
                 >
                   <Box style={{ minWidth: 0 }}>
-                    <Text fw={550} fz={14}>
+                    <Text fw={500} fz={14}>
                       {s.name}
                     </Text>
                     <Text className="mono" fz={12} c="dimmed" truncate maw={360}>

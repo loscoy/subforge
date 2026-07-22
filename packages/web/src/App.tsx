@@ -17,6 +17,7 @@ import {
 import { useEffect, useState } from 'react'
 import { api, getToken, setToken } from './api'
 import { Agent } from './components/Agent'
+import { LoadError, PageSkeleton } from './components/AsyncState'
 import { Mcp } from './components/Mcp'
 import { Profiles } from './components/Profiles'
 import { Subscriptions } from './components/Subscriptions'
@@ -50,7 +51,7 @@ function Brand() {
         style={{
           width: 30,
           height: 30,
-          borderRadius: 9,
+          borderRadius: 8,
           background: 'linear-gradient(135deg,#8b5cf6,#7c3aed)',
           display: 'grid',
           placeItems: 'center',
@@ -60,7 +61,7 @@ function Brand() {
       >
         <IBrand size={17} />
       </Box>
-      <Text fw={650} fz={15.5}>
+      <Text fw={600} fz={15.5}>
         Sub
         <Text span c="dimmed" fw={500}>
           Forge
@@ -74,19 +75,31 @@ export function App() {
   const [tab, setTab] = useState<View>(() => readView(window.location.search))
   const [navOpened, setNavOpened] = useState(false)
   const [meta, setMeta] = useState<Meta | null>(null)
+  const [metaStatus, setMetaStatus] = useState<'loading' | 'success' | 'error'>('loading')
+  const [metaError, setMetaError] = useState('')
   const [needToken, setNeedToken] = useState(false)
   const [tokenInput, setTokenInput] = useState(getToken())
 
-  const loadMeta = () =>
+  const loadMeta = () => {
+    setMetaStatus('loading')
+    setMetaError('')
     api
       .meta()
       .then((m) => {
         setMeta(m)
+        setMetaStatus('success')
         setNeedToken(false)
       })
       .catch((e) => {
-        if (String(e).includes('401')) setNeedToken(true)
+        if (String(e).includes('401')) {
+          setNeedToken(true)
+          setMetaStatus('error')
+          return
+        }
+        setMetaError(String(e))
+        setMetaStatus('error')
       })
+  }
   useEffect(() => {
     loadMeta()
   }, [])
@@ -107,8 +120,8 @@ export function App() {
 
   if (needToken) {
     return (
-      <Box style={{ display: 'grid', placeItems: 'center', minHeight: '100vh' }}>
-        <Card w={400} padding="xl">
+      <Box style={{ display: 'grid', placeItems: 'center', minHeight: '100dvh' }}>
+        <Card w={{ base: 'calc(100% - 32px)', xs: 400 }} padding="xl">
           <Brand />
           <Title order={3} mt="md">
             需要管理口令
@@ -150,13 +163,13 @@ export function App() {
       navbar={{ width: 236, breakpoint: 'sm', collapsed: { mobile: !navOpened } }}
       padding={0}
     >
-      <AppShell.Header hiddenFrom="sm">
+      <AppShell.Header hiddenFrom="sm" style={{ borderColor: 'var(--sf-border-subtle)' }}>
         <Group h="100%" px="md" gap="sm">
           <Burger opened={navOpened} onClick={() => setNavOpened((value) => !value)} size="sm" aria-label="切换导航" />
           <Brand />
         </Group>
       </AppShell.Header>
-      <AppShell.Navbar p="sm">
+      <AppShell.Navbar p="sm" style={{ borderColor: 'var(--sf-border-subtle)' }}>
         <Box visibleFrom="sm">
           <Brand />
         </Box>
@@ -171,12 +184,12 @@ export function App() {
                 leftSection={<Icon size={17} />}
                 onClick={() => selectTab(t.key)}
                 variant="light"
-                style={{ borderRadius: 9, fontWeight: 500 }}
+                style={{ borderRadius: 7, fontWeight: 500 }}
               />
             )
           })}
         </Stack>
-        <Box mt="auto" pt="sm" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+        <Box mt="auto" pt="sm" style={{ borderTop: '1px solid var(--sf-border-subtle)' }}>
           <Group justify="space-between" align="center" wrap="nowrap">
             <Stack gap={4}>
               <Text fz={12} c="dimmed">
@@ -202,22 +215,28 @@ export function App() {
         </Box>
       </AppShell.Navbar>
 
-      <AppShell.Main>
-        <Box px={{ base: 16, sm: 30 }} py={22} style={{ maxWidth: 1180 }}>
+      <AppShell.Main id="main-content">
+        <Box px={{ base: 16, sm: 32 }} py={{ base: 20, sm: 24 }} style={{ maxWidth: 1240 }}>
           <Box mb={20}>
-            <Title order={1} fz={22} fw={650}>
+            <Title order={1} fz={22} fw={600}>
               {cur.title}
             </Title>
             <Text c="dimmed" fz="sm" mt={3}>
               {cur.sub}
             </Text>
           </Box>
-          {tab === 'subs' && <Subscriptions />}
-          {tab === 'profiles' && meta && (
-            <Profiles dts={meta.scriptDts} renderers={meta.renderers} hasAgent={!!meta.hasAgent} />
+          {metaStatus === 'loading' && <PageSkeleton />}
+          {metaStatus === 'error' && <LoadError message={metaError || '无法读取实例信息。'} onRetry={loadMeta} />}
+          {metaStatus === 'success' && meta && (
+            <>
+              {tab === 'subs' && <Subscriptions />}
+              {tab === 'profiles' && (
+                <Profiles dts={meta.scriptDts} renderers={meta.renderers} hasAgent={!!meta.hasAgent} />
+              )}
+              {tab === 'agent' && <Agent hasAgent={!!meta.hasAgent} />}
+              {tab === 'mcp' && <Mcp meta={meta.mcp} />}
+            </>
           )}
-          {tab === 'agent' && <Agent hasAgent={!!meta?.hasAgent} />}
-          {tab === 'mcp' && meta && <Mcp meta={meta.mcp} />}
         </Box>
       </AppShell.Main>
     </AppShell>
