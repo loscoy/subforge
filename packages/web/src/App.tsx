@@ -18,14 +18,14 @@ import { LoadError, PageSkeleton } from './components/AsyncState'
 import { Mcp } from './components/Mcp'
 import { Profiles } from './components/Profiles'
 import { Subscriptions } from './components/Subscriptions'
-import { IBrand, ILayers, IMoon, IPlug, IPlus, IRss, ISparkles, ISun, IX } from './icons'
+import { IBrand, IMoon, IPlus, ISparkles, ISun, IX } from './icons'
 import { readView, writeView, type View } from './navigation'
 import type { Meta } from './types'
 
-const TABS: { key: View; label: string; title: string; sub: string; icon: typeof IRss }[] = [
-  { key: 'subs', label: '订阅', title: '订阅', sub: '添加机场订阅或手工节点，SubForge 会抓取并解析。', icon: IRss },
-  { key: 'profiles', label: '配置', title: '配置', sub: '把订阅按你的规则转成可用配置，用分享链接分发。', icon: ILayers },
-  { key: 'mcp', label: 'MCP', title: 'MCP', sub: '管理外部 Agent 的远端连接与工具访问。', icon: IPlug },
+const TABS: { key: View; label: string; title: string; sub: string }[] = [
+  { key: 'subs', label: '订阅', title: '订阅', sub: '添加机场订阅或手工节点，SubForge 会抓取并解析。' },
+  { key: 'profiles', label: '配置', title: '配置', sub: '把订阅按你的规则转成可用配置，用分享链接分发。' },
+  { key: 'mcp', label: 'MCP', title: 'MCP', sub: '管理外部 Agent 的远端连接与工具访问。' },
 ]
 
 /** ProfileDetail 通过该事件通知「Agent 改动了当前配置」，抽屉与详情面板解耦。 */
@@ -168,26 +168,22 @@ export function App() {
           <Brand />
         </Box>
         <nav className="topbar-nav" aria-label="主导航">
-          {TABS.map((t) => {
-            const Icon = t.icon
-            return (
-              <UnstyledButton
-                key={t.key}
-                component="a"
-                className="topbar-tab"
-                data-active={tab === t.key || undefined}
-                aria-current={tab === t.key ? 'page' : undefined}
-                href={`${window.location.pathname}${writeView(window.location.search, t.key)}${window.location.hash}`}
-                onClick={(event: React.MouseEvent) => {
-                  event.preventDefault()
-                  selectTab(t.key)
-                }}
-              >
-                <Icon size={15} />
-                {t.label}
-              </UnstyledButton>
-            )
-          })}
+          {TABS.map((t) => (
+            <UnstyledButton
+              key={t.key}
+              component="a"
+              className="topbar-tab"
+              data-active={tab === t.key || undefined}
+              aria-current={tab === t.key ? 'page' : undefined}
+              href={`${window.location.pathname}${writeView(window.location.search, t.key)}${window.location.hash}`}
+              onClick={(event: React.MouseEvent) => {
+                event.preventDefault()
+                selectTab(t.key)
+              }}
+            >
+              {t.label}
+            </UnstyledButton>
+          ))}
         </nav>
         <Group gap={12} ml="auto" wrap="nowrap">
           <Text fz={12} c="dimmed" className="topbar-status">
