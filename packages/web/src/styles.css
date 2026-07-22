@@ -19,6 +19,29 @@ body {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
+/* ---------- 异步状态 ---------- */
+.async-skeleton {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+.async-skeleton-row {
+  padding: 13px 2px;
+}
+.async-skeleton-row + .async-skeleton-row {
+  border-top: 1px solid var(--mantine-color-default-border);
+}
+.async-detail-skeleton,
+.async-error {
+  padding: 16px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 8px;
+  background: var(--mantine-color-default);
+}
+.async-message-skeleton {
+  padding: 8px 2px;
+}
+
 /* ---------- Agent 聊天 ---------- */
 .chat {
   display: flex;
