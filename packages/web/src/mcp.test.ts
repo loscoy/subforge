@@ -11,6 +11,11 @@ describe('MCP client configuration', () => {
 
     expect(examples.claudeCode).toContain('claude mcp add --transport http subforge')
     expect(examples.claudeCode).toContain('Authorization: Bearer <MCP_TOKEN>')
+    expect(examples.codex).toContain('export SUBFORGE_MCP_TOKEN="<MCP_TOKEN>"')
+    expect(examples.codex).toContain(
+      'codex mcp add subforge --url "https://subforge.example.com/mcp" --bearer-token-env-var SUBFORGE_MCP_TOKEN',
+    )
+    expect(examples.codex).not.toContain('Bearer <MCP_TOKEN>')
     expect(JSON.parse(examples.json).mcpServers.subforge).toEqual({
       type: 'http',
       url: 'https://subforge.example.com/mcp',

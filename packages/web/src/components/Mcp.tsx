@@ -50,10 +50,15 @@ function CopyField({ value, label, copyLabel }: { value: string; label: string; 
 }
 
 export function Mcp({ meta }: { meta: Meta['mcp'] }) {
-  const [exampleMode, setExampleMode] = useState<'claude' | 'json'>('claude')
+  const [exampleMode, setExampleMode] = useState<'claude' | 'codex' | 'json'>('claude')
   const endpoint = resolveMcpEndpoint(window.location.origin, meta.endpoint)
   const examples = buildMcpExamples(endpoint)
   const authorization = 'Authorization: Bearer <MCP_TOKEN>'
+  const selectedExample = {
+    claude: { value: examples.claudeCode, copyLabel: '复制 Claude Code 命令' },
+    codex: { value: examples.codex, copyLabel: '复制 Codex 命令' },
+    json: { value: examples.json, copyLabel: '复制 JSON 配置' },
+  }[exampleMode]
 
   return (
     <Stack gap={28}>
@@ -117,18 +122,15 @@ export function Mcp({ meta }: { meta: Meta['mcp'] }) {
               <SegmentedControl
                 size="xs"
                 value={exampleMode}
-                onChange={(value) => setExampleMode(value as 'claude' | 'json')}
+                onChange={(value) => setExampleMode(value as 'claude' | 'codex' | 'json')}
                 data={[
                   { value: 'claude', label: 'Claude Code' },
+                  { value: 'codex', label: 'Codex' },
                   { value: 'json', label: '通用 JSON' },
                 ]}
               />
             </Group>
-            {exampleMode === 'claude' ? (
-              <ConfigBlock value={examples.claudeCode} label="复制 Claude Code 命令" />
-            ) : (
-              <ConfigBlock value={examples.json} label="复制 JSON 配置" />
-            )}
+            <ConfigBlock value={selectedExample.value} label={selectedExample.copyLabel} />
           </Box>
         </Stack>
 
