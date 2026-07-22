@@ -833,7 +833,7 @@ function ProfileDetail({
           }}
         />
         <Group justify="flex-end" mt="lg">
-          <Button variant="default" autoFocus disabled={templateSaving} onClick={() => setTemplateOpen(false)}>
+          <Button variant="default" data-autofocus disabled={templateSaving} onClick={() => setTemplateOpen(false)}>
             取消
           </Button>
           <Button loading={templateSaving} disabled={!templateName.trim()} onClick={() => void saveAsTemplate()}>
@@ -847,7 +847,7 @@ function ProfileDetail({
           套用模板“{pendingTemplate?.label}”会替换当前尚未保存的节点处理、代理组、规则和脚本。
         </Text>
         <Group justify="flex-end" mt="lg">
-          <Button variant="default" autoFocus onClick={() => setPendingTemplate(null)}>
+          <Button variant="default" data-autofocus onClick={() => setPendingTemplate(null)}>
             取消
           </Button>
           <Button onClick={confirmApplyTemplate}>套用</Button>
@@ -864,7 +864,7 @@ function ProfileDetail({
       >
         <Text fz="sm">确认删除配置“{name}”？对应的公开订阅链接将立即失效，历史版本也会一并删除。</Text>
         <Group justify="flex-end" mt="lg">
-          <Button variant="default" autoFocus disabled={deleting} onClick={() => setDeleteOpen(false)}>
+          <Button variant="default" data-autofocus disabled={deleting} onClick={() => setDeleteOpen(false)}>
             取消
           </Button>
           <Button color="red" loading={deleting} onClick={() => void remove()}>

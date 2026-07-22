@@ -182,7 +182,11 @@ export function App() {
                 active={tab === t.key}
                 label={t.label}
                 leftSection={<Icon size={17} />}
-                onClick={() => selectTab(t.key)}
+                href={`${window.location.pathname}${writeView(window.location.search, t.key)}${window.location.hash}`}
+                onClick={(event) => {
+                  event.preventDefault()
+                  selectTab(t.key)
+                }}
                 variant="light"
                 style={{ borderRadius: 7, fontWeight: 500 }}
               />

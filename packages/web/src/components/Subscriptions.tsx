@@ -215,7 +215,7 @@ export function Subscriptions() {
           确认删除订阅“{deleteTarget?.name}”？关联配置不会被删除，但将不再从该订阅读取节点。
         </Text>
         <Group justify="flex-end" mt="lg">
-          <Button variant="default" autoFocus disabled={!!deletingId} onClick={() => setDeleteTarget(null)}>
+          <Button variant="default" data-autofocus disabled={!!deletingId} onClick={() => setDeleteTarget(null)}>
             取消
           </Button>
           <Button color="red" loading={!!deletingId} onClick={() => void remove()}>
