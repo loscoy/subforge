@@ -1,4 +1,5 @@
 import type { AgentModelConfig } from './agent/index.js'
+import { parseWebToolsEnv } from './agent/webTools.js'
 
 export interface ServerConfig {
   port: number
@@ -18,7 +19,12 @@ export function getConfig(): ServerConfig {
   const env = process.env
   const agent: AgentModelConfig | undefined =
     env.OPENAI_BASE_URL && env.OPENAI_API_KEY && env.OPENAI_MODEL
-      ? { baseURL: env.OPENAI_BASE_URL, apiKey: env.OPENAI_API_KEY, model: env.OPENAI_MODEL }
+      ? {
+          baseURL: env.OPENAI_BASE_URL,
+          apiKey: env.OPENAI_API_KEY,
+          model: env.OPENAI_MODEL,
+          webTools: parseWebToolsEnv(env),
+        }
       : undefined
   return {
     port: Number(env.PORT ?? 8787),

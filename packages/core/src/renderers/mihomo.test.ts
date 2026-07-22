@@ -1,4 +1,4 @@
-import yaml from 'js-yaml'
+import * as yaml from 'js-yaml'
 import { describe, expect, it } from 'vitest'
 import type { ConversionProfile } from '../config.js'
 import { makeNode, type ProxyNode } from '../model.js'

@@ -1,4 +1,4 @@
-import yaml from 'js-yaml'
+import * as yaml from 'js-yaml'
 import { makeNode, type Network, type ProxyNode, type ProxyType, type TlsOptions, type Transport } from '../model.js'
 
 const SUPPORTED: ReadonlySet<string> = new Set(['vmess', 'vless', 'trojan', 'ss', 'hysteria2', 'tuic'])

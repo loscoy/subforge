@@ -72,6 +72,8 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 1. **工具 handler 抛错要在适配层被捕获并作为结果返回**（`aiSdk.ts` 里 `execute` 已 try/catch 返回 `{ error }`）。直接把异常抛给 AI SDK 会被当成致命错误、直接中断整段流式对话。
 2. 部署缺失的能力用 `buildTools({ ... })` 裁剪掉，别让模型调用注定失败的工具。
 
+例外：**Agent 联网工具（web_search / web_fetch）不在 registry**，而在 `agent/webTools.ts`——它是内嵌 Agent 的部署级增强（MCP 侧外部 agent 自带联网能力，不需要我们提供）。抽象为 `WebCapability` 两种供给形态：`providerTools`（注入请求体、由 LLM 网关服务端执行，如 OpenRouter server tools，经 `injectProviderTools` 在自定义 fetch 里改写请求体）与 `registryTools`（本地 function tool，如 Tavily 实现）。环境变量：`AGENT_WEB_TOOLS=openrouter|tavily`、`AGENT_WEB_ENGINE`、`AGENT_WEB_MAX_TOOL_CALLS`、`AGENT_WEB_MAX_RESULTS`、`TAVILY_API_KEY`（tavily 必需，失败关闭）。新增供应商只在 `buildWebCapability` 加分支。
+
 ### 脚本两种模式（自动识别）
 
 `core/script/types.ts::isOverrideScript` 检测脚本里是否出现 `function main(`：

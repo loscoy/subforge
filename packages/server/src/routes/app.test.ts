@@ -1,4 +1,4 @@
-import yaml from 'js-yaml'
+import * as yaml from 'js-yaml'
 import { describe, expect, it, beforeEach } from 'vitest'
 import { getConfig } from '../config.js'
 import { NodeVmRunner } from '../sandbox/nodeVm.js'

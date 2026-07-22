@@ -30,9 +30,13 @@ export interface AgentRunner {
   runStream(threadId: string, userMessage: string, context?: string): AsyncIterable<AgentEvent>
 }
 
+import type { WebToolsConfig } from './webTools.js'
+
 /** LLM 连接配置（OpenAI 兼容）。 */
 export interface AgentModelConfig {
   baseURL: string
   apiKey: string
   model: string
+  /** 联网工具（web_search / web_fetch），未配置则 Agent 不联网 */
+  webTools?: WebToolsConfig
 }

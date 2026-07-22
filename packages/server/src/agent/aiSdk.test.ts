@@ -1,4 +1,4 @@
-import { MockLanguageModelV1 } from 'ai/test'
+import { MockLanguageModelV4 } from 'ai/test'
 import { describe, expect, it } from 'vitest'
 import { NodeVmRunner } from '../sandbox/nodeVm.js'
 import { InMemoryStorage } from '../storage/index.js'
@@ -6,21 +6,26 @@ import { AiSdkAgentRunner } from './aiSdk.js'
 
 const cfg = { baseURL: 'http://x', apiKey: 'k', model: 'm' }
 
+const genResult = (text: string) => ({
+  content: [{ type: 'text' as const, text }],
+  finishReason: { unified: 'stop' as const, raw: undefined },
+  usage: {
+    inputTokens: { total: 1, noCache: 1 },
+    outputTokens: { total: 1, text: 1 },
+  },
+  warnings: [],
+})
+
 describe('AiSdkAgentRunner（mock 模型）', () => {
   it('运行后把 user/assistant 写入记忆，且系统提示含工作记忆', async () => {
     const storage = new InMemoryStorage()
     storage.setWorkingMemory('用户偏好把香港节点单独分组')
     let capturedSystem = ''
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV4({
       doGenerate: async (opts: any) => {
         const sys = opts.prompt.find((m: any) => m.role === 'system')
         capturedSystem = typeof sys?.content === 'string' ? sys.content : JSON.stringify(sys?.content)
-        return {
-          finishReason: 'stop',
-          usage: { promptTokens: 1, completionTokens: 1 },
-          text: '好的，已按你的偏好处理。',
-          rawCall: { rawPrompt: null, rawSettings: {} },
-        }
+        return genResult('好的，已按你的偏好处理。')
       },
     })
     const runner = new AiSdkAgentRunner({ storage, runner: new NodeVmRunner() }, cfg, 5, () => model)
@@ -38,15 +43,10 @@ describe('AiSdkAgentRunner（mock 模型）', () => {
   it('第二轮对话能带上历史', async () => {
     const storage = new InMemoryStorage()
     let lastPromptLen = 0
-    const model = new MockLanguageModelV1({
+    const model = new MockLanguageModelV4({
       doGenerate: async (opts: any) => {
         lastPromptLen = opts.prompt.filter((m: any) => m.role === 'user' || m.role === 'assistant').length
-        return {
-          finishReason: 'stop',
-          usage: { promptTokens: 1, completionTokens: 1 },
-          text: 'ok',
-          rawCall: { rawPrompt: null, rawSettings: {} },
-        }
+        return genResult('ok')
       },
     })
     const runner = new AiSdkAgentRunner({ storage, runner: new NodeVmRunner() }, cfg, 5, () => model)

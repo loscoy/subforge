@@ -11,12 +11,14 @@ describe('top-level navigation', () => {
   it('reads a supported view and falls back for invalid values', () => {
     expect(readView('?view=mcp')).toBe('mcp')
     expect(readView('?view=unknown')).toBe('profiles')
+    // Agent 已从独立页改为抽屉，旧链接回落到配置页
+    expect(readView('?view=agent')).toBe('profiles')
     expect(readView('')).toBe('profiles')
   })
 
   it('updates the view while preserving unrelated query parameters', () => {
     expect(writeView('?foo=1', 'subs')).toBe('?foo=1&view=subs')
-    expect(writeView('?view=mcp&foo=1', 'agent')).toBe('?view=agent&foo=1')
+    expect(writeView('?view=mcp&foo=1', 'profiles')).toBe('?view=profiles&foo=1')
   })
 
   it('renders focusable links with URL-backed destinations', () => {
@@ -26,13 +28,13 @@ describe('top-level navigation', () => {
       history: { pushState: () => {} },
       addEventListener: () => {},
       removeEventListener: () => {},
+      dispatchEvent: () => true,
     })
 
     const html = renderToStaticMarkup(createElement(MantineProvider, null, createElement(App)))
 
     expect(html).toContain('href="/?foo=1&amp;view=subs#content"')
     expect(html).toContain('href="/?foo=1&amp;view=profiles#content"')
-    expect(html).toContain('href="/?foo=1&amp;view=agent#content"')
     expect(html).toContain('href="/?foo=1&amp;view=mcp#content"')
   })
 })
