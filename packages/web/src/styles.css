@@ -200,6 +200,9 @@ body {
   border-color: var(--mantine-color-dark-4);
 }
 .tool-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   font-family: 'JetBrains Mono', monospace;
   font-size: 11px;
   color: var(--mantine-color-violet-6);
@@ -207,6 +210,17 @@ body {
   border: 1px solid var(--mantine-color-violet-2);
   border-radius: 7px;
   padding: 2px 8px;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 [data-mantine-color-scheme='dark'] .tool-chip {
   color: #c9b6ff;
@@ -269,6 +283,13 @@ body {
   border: 1px solid var(--mantine-color-default-border);
   border-radius: 12px;
   overflow: hidden;
+}
+.script-preview {
+  min-height: 112px;
+  padding: 14px;
+  border: 1px solid var(--sf-border-subtle);
+  border-radius: 8px;
+  background: var(--sf-surface-subtle);
 }
 .logs {
   font-family: 'JetBrains Mono', monospace;

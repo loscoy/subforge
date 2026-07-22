@@ -22,7 +22,7 @@ import {
 } from '@mantine/core'
 import { useDisclosure } from '@mantine/hooks'
 import { notifications } from '@mantine/notifications'
-import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import { api } from '../api'
 import {
   IBot, ICode, IFilter, IGlobe, IHistory, ILayers, ILink, IPlay, IPlus, ISave, ISliders, ITemplate, ITrash, IZap,
@@ -31,7 +31,8 @@ import { builtinTemplates, serverToUI, type UITemplate } from '../templates'
 import type { ConversionProfile, NodeOp, Profile, ProxyGroupDef, Subscription } from '../types'
 import { AgentChatPanel } from './AgentChatPanel'
 import { DetailSkeleton, ListSkeleton, LoadError } from './AsyncState'
-import { ScriptEditor } from './ScriptEditor'
+
+const ScriptEditor = lazy(() => import('./ScriptEditor').then((module) => ({ default: module.ScriptEditor })))
 
 const ok = (message: string) => notifications.show({ color: 'teal', message })
 const fail = (e: unknown) => notifications.show({ color: 'red', message: String(e) })
@@ -812,9 +813,13 @@ function ProfileDetail({
           <span className="mono">function main(config)</span> 覆写）。
         </Text>
         <Collapse in={showScript}>
-          <Box mt="sm">
-            <ScriptEditor profileId={profile.id} value={script} onChange={setScript} dts={dts} />
-          </Box>
+          {showScript && (
+            <Box mt="sm">
+              <Suspense fallback={<DetailSkeleton />}>
+                <ScriptEditor profileId={profile.id} value={script} onChange={setScript} dts={dts} />
+              </Suspense>
+            </Box>
+          )}
         </Collapse>
       </Card>
 

@@ -1,5 +1,5 @@
 import Editor, { type Monaco } from '@monaco-editor/react'
-import { Badge, Box, Card, Group, SimpleGrid, Text, useMantineColorScheme } from '@mantine/core'
+import { Badge, Box, Group, SimpleGrid, Skeleton, Stack, Text, useMantineColorScheme } from '@mantine/core'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
 import type { PreviewResult } from '../types'
@@ -68,7 +68,7 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
         </Text>
       </Box>
       <Box>
-        <Card mb="xs">
+        <Box className="script-preview" mb="xs">
           <Group justify="space-between" mb={6}>
             <Text fw={600} fz="sm">
               实时预览
@@ -79,6 +79,13 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
               </Text>
             )}
           </Group>
+          {running && !preview && (
+            <Stack gap={8} role="status" aria-label="正在运行预览">
+              <Skeleton h={12} w="58%" radius={4} />
+              <Skeleton h={26} radius={6} />
+              <Skeleton h={26} w="82%" radius={6} />
+            </Stack>
+          )}
           {preview && !preview.ok && (
             <Text c="red" fz="sm">
               错误：{preview.error}
@@ -98,7 +105,7 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
               </Group>
             </>
           )}
-        </Card>
+        </Box>
         {preview && preview.logs.length > 0 && <div className="logs">{preview.logs.join('\n')}</div>}
       </Box>
     </SimpleGrid>

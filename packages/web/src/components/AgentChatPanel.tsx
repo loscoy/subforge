@@ -1,9 +1,10 @@
-import { ActionIcon, Group, Text, Textarea } from '@mantine/core'
+import { ActionIcon, Group, Loader, Text, Textarea } from '@mantine/core'
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { api } from '../api'
-import { ISend } from '../icons'
+import { ICheck, ISend } from '../icons'
+import { LoadError, MessageSkeleton } from './AsyncState'
 
 interface ChatItem {
   role: 'user' | 'assistant'
@@ -34,7 +35,9 @@ const ToolRow = ({ tools, running }: { tools: string[]; running?: boolean }) =>
     <Group gap={5} mb={4}>
       {tools.map((t, i) => (
         <span key={i} className="tool-chip">
-          {running && i === tools.length - 1 ? '⏳' : '✓'} {t}
+          {running && i === tools.length - 1 ? <Loader size={10} aria-hidden="true" /> : <ICheck size={11} />}
+          <span>{t}</span>
+          <span className="visually-hidden">{running && i === tools.length - 1 ? '运行中' : '已完成'}</span>
         </span>
       ))}
     </Group>
@@ -63,24 +66,44 @@ export function AgentChatPanel({
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
   const [err, setErr] = useState('')
+  const [historyLoading, setHistoryLoading] = useState(true)
+  const [historyError, setHistoryError] = useState('')
   // 当前进行中的一轮（流式）
   const [live, setLive] = useState<{ text: string; tools: string[] } | null>(null)
   const turn = useRef<{ text: string; tools: string[] }>({ text: '', tools: [] })
   const logRef = useRef<HTMLDivElement>(null)
   // 是否「贴底」：仅当用户已在底部附近时才随新内容自动滚动，避免打断用户上翻查看历史
   const stick = useRef(true)
+  const historyRequest = useRef(0)
 
-  useEffect(() => {
-    api
-      .agentMessages(threadId)
-      .then((msgs) =>
-        setItems(
-          msgs
-            .filter((m) => m.role === 'user' || m.role === 'assistant')
-            .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content, tools: m.tools })),
-        ),
+  const loadHistory = async () => {
+    const requestId = ++historyRequest.current
+    setItems([])
+    setHistoryLoading(true)
+    setHistoryError('')
+    try {
+      const messages = await api.agentMessages(threadId)
+      if (requestId !== historyRequest.current) return
+      setItems(
+        messages
+          .filter((message) => message.role === 'user' || message.role === 'assistant')
+          .map((message) => ({
+            role: message.role === 'user' ? 'user' : 'assistant',
+            content: message.content,
+            tools: message.tools,
+          })),
       )
-      .catch(() => {})
+    } catch (e) {
+      if (requestId === historyRequest.current) setHistoryError(String(e))
+    } finally {
+      if (requestId === historyRequest.current) setHistoryLoading(false)
+    }
+  }
+  useEffect(() => {
+    void loadHistory()
+    return () => {
+      historyRequest.current += 1
+    }
   }, [threadId])
   useEffect(() => {
     if (stick.current) logRef.current?.scrollTo(0, logRef.current.scrollHeight)
@@ -140,11 +163,15 @@ export function AgentChatPanel({
           stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 60
         }}
       >
-        {items.length === 0 && !live && (
+        {historyLoading ? (
+          <MessageSkeleton />
+        ) : historyError ? (
+          <LoadError message={historyError} onRetry={() => void loadHistory()} />
+        ) : items.length === 0 && !live ? (
           <Text c="dimmed" fz="sm" p="xs">
             {placeholder || '对我说需求，例如「把香港节点单独分一组」「加一条 Netflix 分流」「把当前配置存成模板 家用」。'}
           </Text>
-        )}
+        ) : null}
         {items.map((it, i) => (
           <div key={i} className={`turn ${it.role}`}>
             {it.role === 'assistant' && it.tools && <ToolRow tools={it.tools} />}
@@ -170,7 +197,7 @@ export function AgentChatPanel({
           {err}
         </Text>
       )}
-      <Group gap={8} pt={10} mt={8} align="flex-end" style={{ borderTop: '1px solid var(--mantine-color-default-border)' }}>
+      <Group gap={8} pt={10} mt={8} align="flex-end" style={{ borderTop: '1px solid var(--sf-border-subtle)' }}>
         <Textarea
           style={{ flex: 1 }}
           autosize
@@ -186,7 +213,7 @@ export function AgentChatPanel({
             }
           }}
         />
-        <ActionIcon size={36} radius="md" onClick={send} loading={busy} aria-label="发送">
+        <ActionIcon size={40} radius="md" onClick={() => void send()} loading={busy} aria-label="发送">
           <ISend size={16} />
         </ActionIcon>
       </Group>
