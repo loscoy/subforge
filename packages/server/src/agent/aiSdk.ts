@@ -1,5 +1,5 @@
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
-import { generateText, streamText, tool, type CoreMessage, type LanguageModelV1 } from 'ai'
+import { generateText, stepCountIs, streamText, tool, type LanguageModel, type ModelMessage } from 'ai'
 import { buildTools, type ToolContext } from '../tools/registry.js'
 import { MemoryManager } from './memory.js'
 import type { AgentEvent, AgentModelConfig, AgentReply, AgentRunner, AgentStep } from './runner.js'
@@ -16,7 +16,7 @@ export class AiSdkAgentRunner implements AgentRunner {
     private readonly toolCtx: ToolContext,
     private readonly config: AgentModelConfig,
     private readonly maxSteps = 10,
-    private readonly modelFactory: () => LanguageModelV1 = () =>
+    private readonly modelFactory: () => LanguageModel = () =>
       createOpenAICompatible({ name: 'subforge', baseURL: config.baseURL, apiKey: config.apiKey })(config.model),
   ) {
     this.memory = new MemoryManager(toolCtx.storage)
@@ -27,18 +27,18 @@ export class AiSdkAgentRunner implements AgentRunner {
 
     const { system: baseSystem, history } = await this.memory.loadContext(threadId)
     const system = context ? `${baseSystem}\n\n# 当前上下文\n${context}` : baseSystem
-    const messages: CoreMessage[] = [
-      ...history.map((h) => ({ role: h.role, content: h.content }) as CoreMessage),
+    const messages: ModelMessage[] = [
+      ...history.map((h) => ({ role: h.role, content: h.content }) as ModelMessage),
       { role: 'user', content: userMessage },
     ]
 
     const steps: AgentStep[] = []
     const { text } = await generateText({
       model,
-      system,
+      instructions: system,
       messages,
       tools: this.buildTools(steps),
-      maxSteps: this.maxSteps,
+      stopWhen: stepCountIs(this.maxSteps),
     })
 
     await this.memory.record(threadId, 'user', userMessage)
@@ -58,7 +58,7 @@ export class AiSdkAgentRunner implements AgentRunner {
         t.name,
         tool({
           description: t.description,
-          parameters: t.schema,
+          inputSchema: t.schema,
           execute: async (args: unknown) => {
             try {
               const result = await t.handler(args as never, this.toolCtx)
@@ -79,23 +79,31 @@ export class AiSdkAgentRunner implements AgentRunner {
     const model = this.modelFactory()
     const { system: base, history } = await this.memory.loadContext(threadId)
     const system = context ? `${base}\n\n# 当前上下文\n${context}` : base
-    const messages: CoreMessage[] = [
-      ...history.map((h) => ({ role: h.role, content: h.content }) as CoreMessage),
+    const messages: ModelMessage[] = [
+      ...history.map((h) => ({ role: h.role, content: h.content }) as ModelMessage),
       { role: 'user', content: userMessage },
     ]
 
-    const result = streamText({ model, system, messages, tools: this.buildTools(), maxSteps: this.maxSteps })
+    const result = streamText({
+      model,
+      instructions: system,
+      messages,
+      tools: this.buildTools(),
+      stopWhen: stepCountIs(this.maxSteps),
+    })
     let finalText = ''
     const usedTools: string[] = []
     try {
-      for await (const part of result.fullStream) {
+      for await (const part of result.stream) {
         if (part.type === 'text-delta') {
-          finalText += part.textDelta
-          yield { type: 'text', delta: part.textDelta }
+          finalText += part.text
+          yield { type: 'text', delta: part.text }
         } else if (part.type === 'tool-call') {
           usedTools.push(part.toolName)
           yield { type: 'tool-call', tool: part.toolName }
-        } else if (part.type === 'tool-result') {
+        } else if (part.type === 'tool-result' || part.type === 'tool-error') {
+          // registry 工具的错误已在 execute 里转成 { error } 结果，tool-error 理论上
+          // 只会来自框架层异常；两者都作为「该工具已结束」上报，避免前端卡在运行中。
           yield { type: 'tool-result', tool: part.toolName }
         } else if (part.type === 'error') {
           yield { type: 'error', error: part.error instanceof Error ? part.error.message : String(part.error) }

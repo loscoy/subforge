@@ -1,4 +1,4 @@
-import yaml from 'js-yaml'
+import * as yaml from 'js-yaml'
 import type { ConversionProfile } from './config.js'
 import type { ProxyNode } from './model.js'
 import { parseSubscription } from './parsers/index.js'

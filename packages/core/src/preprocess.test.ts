@@ -54,7 +54,7 @@ describe('模板 + 管线端到端', () => {
     const raw = ['trojan://p1@a.com:1#🇭🇰 HK 01', 'trojan://p2@b.com:2#🇺🇸 US 01', 'trojan://p1@a.com:1#🇭🇰 HK 01'].join('\n')
     const tpl = TEMPLATES.find((t) => t.key === 'standard')!
     const out = await runPipeline({ rawSubscriptions: [raw], target: 'mihomo', profile: tpl.profile })
-    const yaml = (await import('js-yaml')).default
+    const yaml = await import('js-yaml')
     const cfg = yaml.load(out.config) as any
     // 去重后 2 个节点
     expect(cfg.proxies).toHaveLength(2)
