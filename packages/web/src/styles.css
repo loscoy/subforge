@@ -103,6 +103,7 @@ body {
   font-weight: 600;
   display: inline-flex;
   align-items: center;
+  gap: 7px;
   color: var(--mantine-color-text);
   transition: background-color 160ms ease, color 160ms ease;
 }
