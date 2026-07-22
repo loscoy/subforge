@@ -197,7 +197,7 @@ export function AgentChatPanel({
           {err}
         </Text>
       )}
-      <Group gap={8} pt={10} mt={8} align="flex-end" style={{ borderTop: '1px solid var(--sf-border-subtle)' }}>
+      <Group className="chat-composer" gap={8} pt={10} mt={8} align="flex-end">
         <Textarea
           style={{ flex: 1 }}
           autosize

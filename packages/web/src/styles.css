@@ -1,17 +1,17 @@
 /* 全局：仅保留 Mantine 之外需要的少量样式。字体在 index.html 引入。 */
 :root {
-  --mantine-color-body: #fbfbfd;
+  --sf-app-background: #f3f5f8;
   --sf-chat-accent: #7c3aed;
   --sf-surface: #ffffff;
-  --sf-surface-subtle: #f5f5f7;
+  --sf-surface-subtle: #f3f4f7;
   --sf-border-subtle: #e7e7eb;
   --sf-border-interactive: #c9cad1;
   --sf-focus-ring: rgba(124, 58, 237, 0.34);
 }
 [data-mantine-color-scheme='dark'] {
-  --mantine-color-body: #0f1118;
+  --sf-app-background: #0d0f17;
   --sf-surface: #171923;
-  --sf-surface-subtle: #1d202a;
+  --sf-surface-subtle: #20232f;
   --sf-border-subtle: #2b2e39;
   --sf-border-interactive: #444856;
   --sf-focus-ring: rgba(167, 139, 250, 0.46);
@@ -28,7 +28,9 @@ body {
   height: 100%;
 }
 body {
+  --mantine-color-body: var(--sf-app-background);
   -webkit-font-smoothing: antialiased;
+  background: var(--sf-app-background);
   letter-spacing: 0;
   line-height: 1.5;
 }
@@ -201,15 +203,16 @@ body {
   display: flex;
   flex-direction: column;
   gap: 5px;
-  max-width: 90%;
 }
 .turn.user {
   align-self: flex-end;
   align-items: flex-end;
+  max-width: 82%;
 }
 .turn.assistant {
   align-self: flex-start;
   align-items: flex-start;
+  max-width: min(92%, 960px);
 }
 .msg {
   padding: 9px 13px;
@@ -224,13 +227,11 @@ body {
   white-space: pre-wrap;
 }
 .msg.assistant {
-  background: var(--mantine-color-gray-0);
-  border: 1px solid var(--mantine-color-gray-2);
+  background: var(--sf-surface-subtle);
   border-bottom-left-radius: 4px;
 }
 [data-mantine-color-scheme='dark'] .msg.assistant {
-  background: var(--mantine-color-dark-6);
-  border-color: var(--mantine-color-dark-4);
+  background: var(--sf-surface-subtle);
 }
 .tool-chip {
   display: inline-flex;
@@ -240,7 +241,6 @@ body {
   font-size: 11px;
   color: var(--mantine-color-violet-6);
   background: var(--mantine-color-violet-0);
-  border: 1px solid var(--mantine-color-violet-2);
   border-radius: 7px;
   padding: 2px 8px;
 }
@@ -258,7 +258,6 @@ body {
 [data-mantine-color-scheme='dark'] .tool-chip {
   color: #c9b6ff;
   background: rgba(139, 92, 246, 0.13);
-  border-color: rgba(139, 92, 246, 0.4);
 }
 .caret {
   display: inline-block;
@@ -391,8 +390,14 @@ body {
 .md a:hover {
   text-decoration: underline;
 }
+.md hr {
+  height: 20px;
+  margin: 0.25em 0;
+  border: 0;
+}
 .md table {
-  border-collapse: collapse;
+  border-collapse: separate;
+  border-spacing: 0 3px;
   margin: 0.6em 0;
   font-size: 12.5px;
   display: block;
@@ -400,21 +405,25 @@ body {
 }
 .md th,
 .md td {
-  border: 1px solid var(--mantine-color-gray-3);
   padding: 5px 10px;
   text-align: left;
 }
 .md th {
-  background: var(--mantine-color-gray-1);
+  background: var(--sf-surface);
   font-weight: 600;
+}
+.md tbody tr:nth-child(odd) td {
+  background: var(--sf-surface);
+}
+.md tr > :first-child {
+  border-radius: 6px 0 0 6px;
+}
+.md tr > :last-child {
+  border-radius: 0 6px 6px 0;
 }
 [data-mantine-color-scheme='dark'] .md code {
   background: var(--mantine-color-dark-5);
 }
-[data-mantine-color-scheme='dark'] .md th,
-[data-mantine-color-scheme='dark'] .md td {
-  border-color: var(--mantine-color-dark-4);
-}
 [data-mantine-color-scheme='dark'] .md th {
-  background: var(--mantine-color-dark-6);
+  background: var(--sf-surface);
 }
