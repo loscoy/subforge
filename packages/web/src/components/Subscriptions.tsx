@@ -1,40 +1,96 @@
-import { ActionIcon, Badge, Box, Button, Card, Group, Stack, Text, Textarea, TextInput } from '@mantine/core'
+import { ActionIcon, Badge, Box, Button, Card, Group, Modal, Stack, Text, Textarea, TextInput } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
 import { api } from '../api'
 import { fmtBytes, fmtExpire, usedBytes } from '../format'
 import { IInbox, IPlus, IRefresh, IRss, ITrash } from '../icons'
 import type { Subscription } from '../types'
+import { ListSkeleton, LoadError } from './AsyncState'
 
 export function Subscriptions() {
   const [subs, setSubs] = useState<Subscription[]>([])
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [content, setContent] = useState('')
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState('')
+  const [adding, setAdding] = useState(false)
+  const [refreshingId, setRefreshingId] = useState<string | null>(null)
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteTarget, setDeleteTarget] = useState<Subscription | null>(null)
 
   const fail = (e: unknown) => notifications.show({ color: 'red', message: String(e) })
-  const load = () => api.listSubscriptions().then(setSubs).catch(fail)
+  const load = async (initial = false) => {
+    if (initial) setLoading(true)
+    try {
+      setSubs(await api.listSubscriptions())
+      setLoadError('')
+    } catch (e) {
+      if (initial) setLoadError(String(e))
+      else fail(e)
+    } finally {
+      if (initial) setLoading(false)
+    }
+  }
   useEffect(() => {
-    load()
+    void load(true)
   }, [])
 
   const add = async () => {
+    if (adding) return
+    setAdding(true)
     try {
       await api.createSubscription({ name: name || '未命名', url: url || undefined, content: content || undefined })
       setName('')
       setUrl('')
       setContent('')
       notifications.show({ color: 'teal', message: '已添加订阅' })
-      load()
+      await load()
     } catch (e) {
       fail(e)
+    } finally {
+      setAdding(false)
+    }
+  }
+
+  const refresh = async (subscription: Subscription) => {
+    if (refreshingId) return
+    setRefreshingId(subscription.id)
+    try {
+      await api.refreshSubscription(subscription.id)
+      await load()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setRefreshingId(null)
+    }
+  }
+
+  const remove = async () => {
+    if (!deleteTarget || deletingId) return
+    setDeletingId(deleteTarget.id)
+    try {
+      await api.deleteSubscription(deleteTarget.id)
+      notifications.show({ color: 'teal', message: '已删除订阅' })
+      setDeleteTarget(null)
+      await load()
+    } catch (e) {
+      fail(e)
+    } finally {
+      setDeletingId(null)
     }
   }
 
   return (
-    <Group align="flex-start" gap="lg" wrap="nowrap">
+    <Box className="subscriptions-layout">
       <Box style={{ flex: 1, minWidth: 0 }}>
-        {subs.length === 0 ? (
+        {loading ? (
+          <Card>
+            <ListSkeleton rows={4} />
+          </Card>
+        ) : loadError ? (
+          <LoadError message={loadError} onRetry={() => void load(true)} />
+        ) : subs.length === 0 ? (
           <Card>
             <Stack align="center" gap={6} py={40} c="dimmed">
               <IInbox size={34} />
@@ -42,7 +98,7 @@ export function Subscriptions() {
                 还没有订阅
               </Text>
               <Text fz="sm" ta="center">
-                在右侧粘贴订阅链接或节点，SubForge 会自动抓取解析。
+                粘贴订阅链接或节点后，SubForge 会自动抓取解析。
               </Text>
             </Stack>
           </Card>
@@ -59,14 +115,9 @@ export function Subscriptions() {
             </Group>
             <Stack gap={4}>
               {subs.map((s) => (
-                <Group
+                <Box
                   key={s.id}
-                  justify="space-between"
-                  wrap="nowrap"
-                  align="flex-start"
-                  py={9}
-                  px={11}
-                  style={{ borderRadius: 10, border: '1px solid var(--mantine-color-default-border)' }}
+                  className="subscription-row"
                 >
                   <Box style={{ minWidth: 0 }}>
                     <Text fw={500} fz={14}>
@@ -99,7 +150,9 @@ export function Subscriptions() {
                         size="xs"
                         variant="default"
                         leftSection={<IRefresh size={14} />}
-                        onClick={() => api.refreshSubscription(s.id).then(load).catch(fail)}
+                        loading={refreshingId === s.id}
+                        disabled={refreshingId !== null && refreshingId !== s.id}
+                        onClick={() => void refresh(s)}
                       >
                         刷新
                       </Button>
@@ -108,20 +161,21 @@ export function Subscriptions() {
                       size="lg"
                       variant="subtle"
                       color="red"
-                      onClick={() => api.deleteSubscription(s.id).then(load).catch(fail)}
-                      aria-label="删除"
+                      loading={deletingId === s.id}
+                      onClick={() => setDeleteTarget(s)}
+                      aria-label={`删除订阅 ${s.name}`}
                     >
                       <ITrash size={15} />
                     </ActionIcon>
                   </Group>
-                </Group>
+                </Box>
               ))}
             </Stack>
           </Card>
         )}
       </Box>
 
-      <Box w={360} style={{ flexShrink: 0 }}>
+      <Box style={{ minWidth: 0 }}>
         <Card>
           <Group gap={8} mb="sm">
             <IPlus size={15} />
@@ -142,12 +196,33 @@ export function Subscriptions() {
               value={content}
               onChange={(e) => setContent(e.currentTarget.value)}
             />
-            <Button leftSection={<IPlus size={15} />} onClick={add}>
+            <Button leftSection={<IPlus size={15} />} loading={adding} onClick={() => void add()}>
               添加订阅
             </Button>
           </Stack>
         </Card>
       </Box>
-    </Group>
+
+      <Modal
+        opened={!!deleteTarget}
+        onClose={() => !deletingId && setDeleteTarget(null)}
+        title="删除订阅"
+        centered
+        closeOnClickOutside={!deletingId}
+        closeOnEscape={!deletingId}
+      >
+        <Text fz="sm">
+          确认删除订阅“{deleteTarget?.name}”？关联配置不会被删除，但将不再从该订阅读取节点。
+        </Text>
+        <Group justify="flex-end" mt="lg">
+          <Button variant="default" autoFocus disabled={!!deletingId} onClick={() => setDeleteTarget(null)}>
+            取消
+          </Button>
+          <Button color="red" loading={!!deletingId} onClick={() => void remove()}>
+            删除
+          </Button>
+        </Group>
+      </Modal>
+    </Box>
   )
 }

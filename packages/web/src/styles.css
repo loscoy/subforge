@@ -68,6 +68,24 @@ body {
   padding: 8px 2px;
 }
 
+/* ---------- 页面布局 ---------- */
+.subscriptions-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  gap: 24px;
+  align-items: start;
+}
+.subscription-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: start;
+  padding: 11px 12px;
+  border: 1px solid var(--sf-border-subtle);
+  border-radius: 8px;
+  background: var(--sf-surface);
+}
+
 /* ---------- Agent 聊天 ---------- */
 .chat {
   display: flex;
@@ -164,6 +182,13 @@ body {
   .mantine-ActionIcon-root {
     min-width: 44px;
     min-height: 44px;
+  }
+  .subscriptions-layout,
+  .subscription-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .subscription-row .mantine-Group-root:last-child {
+    justify-content: flex-end;
   }
 }
 
