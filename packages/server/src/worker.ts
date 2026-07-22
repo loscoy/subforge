@@ -26,6 +26,7 @@ export interface Env {
   ASSETS?: Fetcher
   ADMIN_TOKEN?: string
   SUBFORGE_ALLOW_NO_AUTH?: string
+  MCP_TOKEN?: string
   OPENAI_BASE_URL?: string
   OPENAI_API_KEY?: string
   OPENAI_MODEL?: string
@@ -49,6 +50,7 @@ export default {
       dbPath: '',
       adminToken: env.ADMIN_TOKEN || undefined,
       allowNoAuth: env.SUBFORGE_ALLOW_NO_AUTH === '1',
+      mcpToken: env.MCP_TOKEN || undefined,
       agent,
     }
 

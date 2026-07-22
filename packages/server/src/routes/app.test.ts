@@ -129,3 +129,103 @@ describe('管理接口鉴权（失败关闭）', () => {
     expect(res.status).toBe(404)
   })
 })
+
+describe('远端 MCP', () => {
+  const base = { ...getConfig(), adminToken: undefined, allowNoAuth: true }
+  const json = (res: Response) => res.json() as Promise<any>
+  const mcpRequest = (body: unknown, token?: string) =>
+    new Request('http://x/mcp', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        accept: 'application/json, text/event-stream',
+        ...(token ? { authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(body),
+    })
+  const initialize = {
+    jsonrpc: '2.0',
+    id: 1,
+    method: 'initialize',
+    params: {
+      protocolVersion: '2025-06-18',
+      capabilities: {},
+      clientInfo: { name: 'vitest', version: '1.0.0' },
+    },
+  }
+  const toolsList = { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }
+
+  const mk = (mcpToken?: string, checkNodes?: Parameters<typeof createApp>[0]['checkNodes']) =>
+    createApp({
+      storage: new InMemoryStorage(),
+      runner: new NodeVmRunner(),
+      config: { ...base, mcpToken } as Parameters<typeof createApp>[0]['config'],
+      checkNodes,
+    })
+
+  it('未配置 MCP_TOKEN 时失败关闭', async () => {
+    const res = await mk().fetch(mcpRequest(initialize, 'anything'))
+    expect(res.status).toBe(503)
+  })
+
+  it('配置 MCP_TOKEN 后要求正确的 Bearer token', async () => {
+    const app = mk('mcp-secret')
+    const missing = await app.fetch(mcpRequest(initialize))
+    const wrong = await app.fetch(mcpRequest(initialize, 'wrong'))
+
+    expect(missing.status).toBe(401)
+    expect(missing.headers.get('www-authenticate')).toBe('Bearer')
+    expect(wrong.status).toBe(401)
+  })
+
+  it('正确 token 可以初始化 MCP', async () => {
+    const res = await mk('mcp-secret').fetch(mcpRequest(initialize, 'mcp-secret'))
+    expect(res.status).toBe(200)
+    const body = await json(res)
+    expect(body.result.serverInfo.name).toBe('subforge')
+  })
+
+  it('无状态端点仅接受 POST', async () => {
+    const app = mk('mcp-secret')
+    for (const method of ['GET', 'DELETE']) {
+      const res = await app.fetch(
+        new Request('http://x/mcp', {
+          method,
+          headers: {
+            accept: 'application/json, text/event-stream',
+            authorization: 'Bearer mcp-secret',
+          },
+        }),
+      )
+      expect(res.status).toBe(405)
+      expect(res.headers.get('allow')).toBe('POST')
+    }
+  })
+
+  it('按运行时能力裁剪工具', async () => {
+    const edgeRes = await mk('mcp-secret').fetch(mcpRequest(toolsList, 'mcp-secret'))
+    const nodeRes = await mk('mcp-secret', async () => []).fetch(mcpRequest(toolsList, 'mcp-secret'))
+    expect(edgeRes.status).toBe(200)
+    expect(nodeRes.status).toBe(200)
+    const edgeTools = (await json(edgeRes)).result.tools.map((tool: { name: string }) => tool.name)
+    const nodeTools = (await json(nodeRes)).result.tools.map((tool: { name: string }) => tool.name)
+
+    expect(edgeTools).toContain('list_profiles')
+    expect(edgeTools).not.toContain('test_nodes')
+    expect(nodeTools).toContain('test_nodes')
+  })
+
+  it('管理元数据公开连接信息但不泄露 token', async () => {
+    const res = await mk('mcp-secret').fetch(new Request('http://x/api/meta'))
+    const meta = await json(res)
+
+    expect(meta.mcp).toMatchObject({
+      enabled: true,
+      endpoint: '/mcp',
+      transport: 'streamable-http',
+    })
+    expect(meta.mcp.tools.some((tool: { name: string }) => tool.name === 'list_profiles')).toBe(true)
+    expect(meta.mcp.tools.some((tool: { name: string }) => tool.name === 'test_nodes')).toBe(false)
+    expect(JSON.stringify(meta)).not.toContain('mcp-secret')
+  })
+})

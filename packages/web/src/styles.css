@@ -13,7 +13,7 @@ body {
 }
 body {
   -webkit-font-smoothing: antialiased;
-  letter-spacing: -0.006em;
+  letter-spacing: 0;
 }
 .mono {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;

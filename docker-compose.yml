@@ -9,8 +9,10 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      # 管理口令（留空则不鉴权，仅建议本地使用）
+      # 管理口令（留空时管理接口默认锁定）
       ADMIN_TOKEN: ${ADMIN_TOKEN:-}
+      # 远端 MCP Bearer token（留空则禁用远端 MCP）
+      MCP_TOKEN: ${MCP_TOKEN:-}
       # Agent（兼容 OpenAI 接口）——不填则 Agent 面板禁用
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-}
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}

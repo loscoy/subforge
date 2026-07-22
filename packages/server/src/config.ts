@@ -7,6 +7,8 @@ export interface ServerConfig {
   adminToken?: string
   /** 未设 adminToken 时是否允许无鉴权提供管理接口。默认 false（失败关闭），需显式开启。 */
   allowNoAuth?: boolean
+  /** 远端 MCP 的 Bearer token。未配置时远端 MCP 失败关闭。 */
+  mcpToken?: string
   /** 前端静态资源目录（生产环境由后端托管） */
   webDir?: string
   agent?: AgentModelConfig
@@ -23,6 +25,7 @@ export function getConfig(): ServerConfig {
     dbPath: env.DB_PATH ?? './data/subforge.sqlite',
     adminToken: env.ADMIN_TOKEN || undefined,
     allowNoAuth: env.SUBFORGE_ALLOW_NO_AUTH === '1',
+    mcpToken: env.MCP_TOKEN || undefined,
     webDir: env.WEB_DIR || undefined,
     agent,
   }

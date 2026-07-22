@@ -41,7 +41,7 @@
 ### Docker（推荐）
 
 ```bash
-cp .env.example .env   # 按需填 ADMIN_TOKEN / OPENAI_*
+cp .env.example .env   # 按需填 ADMIN_TOKEN / MCP_TOKEN / OPENAI_*
 docker compose up -d
 # 打开 http://localhost:8787
 ```
@@ -68,13 +68,43 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 | `DB_PATH` | sqlite 路径（默认 `./data/subforge.sqlite`） |
 | `ADMIN_TOKEN` | 管理接口口令（Bearer / `X-Admin-Token`）。**强烈建议设置**：未设时管理接口默认锁定（返回 503） |
 | `SUBFORGE_ALLOW_NO_AUTH` | 设为 `1` 时，允许在未设 `ADMIN_TOKEN` 的情况下无鉴权提供管理接口（仅限本地自用，切勿暴露公网） |
+| `MCP_TOKEN` | 远端 MCP 的 Bearer token。未设时 `/mcp` 默认锁定（返回 503） |
 | `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | Agent 用的兼容 OpenAI 接口；不填则 Agent 禁用 |
 
-> 安全说明：管理接口默认**失败关闭**——既未设 `ADMIN_TOKEN` 也未设 `SUBFORGE_ALLOW_NO_AUTH=1` 时，`/api/*` 一律返回 503（分享出口 `/sub/:token` 不受影响，仍公开）。此外，抓取订阅 URL 时会做 SSRF 防护，拒绝 `localhost`/内网/`169.254.169.254`(云元数据) 等地址。
+> 安全说明：管理接口默认**失败关闭**——既未设 `ADMIN_TOKEN` 也未设 `SUBFORGE_ALLOW_NO_AUTH=1` 时，`/api/*` 一律返回 503（分享出口 `/sub/:token` 不受影响，仍公开）。远端 MCP 使用独立的 `MCP_TOKEN`，不受无鉴权模式影响。抓取订阅 URL 时会做 SSRF 防护，拒绝 `localhost`/内网/`169.254.169.254`(云元数据) 等地址。
 
 ## 用 Claude Code 等驱动（MCP）
 
-同一套工具也以 MCP server 暴露。把下面加进你的 MCP 客户端配置即可用自己的 agent 操作 SubForge：
+同一套工具同时支持远端 Streamable HTTP 与本地 stdio。工具具有修改脚本、配置与版本的管理权限，请把 MCP token 视同管理员凭据。
+
+### 远端 Streamable HTTP
+
+设置 `MCP_TOKEN` 并重启服务后，端点为 `https://你的域名/mcp`。Claude Code 可这样连接：
+
+```bash
+claude mcp add --transport http subforge "https://subforge.example.com/mcp" \
+  --header "Authorization: Bearer <MCP_TOKEN>"
+```
+
+通用 HTTP 客户端配置：
+
+```json
+{
+  "mcpServers": {
+    "subforge": {
+      "type": "http",
+      "url": "https://subforge.example.com/mcp",
+      "headers": { "Authorization": "Bearer <MCP_TOKEN>" }
+    }
+  }
+}
+```
+
+管理界面的“MCP”页面会按当前域名生成配置，并列出当前运行时可用的工具。固定 Bearer token 适用于支持自定义 HTTP header 的客户端；只接受 OAuth 的托管客户端暂不支持。
+
+### 本地 stdio
+
+stdio 模式直接访问同一个 sqlite 文件，不需要 `MCP_TOKEN`：
 
 ```json
 {

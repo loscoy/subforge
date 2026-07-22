@@ -2,6 +2,7 @@ import {
   ActionIcon,
   AppShell,
   Box,
+  Burger,
   Button,
   Card,
   Group,
@@ -16,17 +17,19 @@ import {
 import { useEffect, useState } from 'react'
 import { api, getToken, setToken } from './api'
 import { Agent } from './components/Agent'
+import { Mcp } from './components/Mcp'
 import { Profiles } from './components/Profiles'
 import { Subscriptions } from './components/Subscriptions'
-import { IBrand, ILayers, IMoon, IRss, ISparkles, ISun } from './icons'
+import { IBrand, ILayers, IMoon, IPlug, IRss, ISparkles, ISun } from './icons'
 import type { Meta } from './types'
 
-type Tab = 'subs' | 'profiles' | 'agent'
+type Tab = 'subs' | 'profiles' | 'agent' | 'mcp'
 
 const TABS: { key: Tab; label: string; title: string; sub: string; icon: typeof IRss }[] = [
   { key: 'subs', label: '订阅', title: '订阅', sub: '添加机场订阅或手工节点，SubForge 会抓取并解析。', icon: IRss },
   { key: 'profiles', label: '配置', title: '配置', sub: '把订阅按你的规则转成可用配置，用分享链接分发。', icon: ILayers },
   { key: 'agent', label: 'Agent', title: 'Agent', sub: '用对话调整配置、写脚本、管理模板。', icon: ISparkles },
+  { key: 'mcp', label: 'MCP', title: 'MCP', sub: '管理外部 Agent 的远端连接与工具访问。', icon: IPlug },
 ]
 
 function ThemeToggle() {
@@ -70,6 +73,7 @@ function Brand() {
 
 export function App() {
   const [tab, setTab] = useState<Tab>('profiles')
+  const [navOpened, setNavOpened] = useState(false)
   const [meta, setMeta] = useState<Meta | null>(null)
   const [needToken, setNeedToken] = useState(false)
   const [tokenInput, setTokenInput] = useState(getToken())
@@ -128,9 +132,21 @@ export function App() {
   const cur = TABS.find((t) => t.key === tab)!
 
   return (
-    <AppShell navbar={{ width: 236, breakpoint: 'sm' }} padding={0}>
+    <AppShell
+      header={{ height: { base: 56, sm: 0 } }}
+      navbar={{ width: 236, breakpoint: 'sm', collapsed: { mobile: !navOpened } }}
+      padding={0}
+    >
+      <AppShell.Header hiddenFrom="sm">
+        <Group h="100%" px="md" gap="sm">
+          <Burger opened={navOpened} onClick={() => setNavOpened((value) => !value)} size="sm" aria-label="切换导航" />
+          <Brand />
+        </Group>
+      </AppShell.Header>
       <AppShell.Navbar p="sm">
-        <Brand />
+        <Box visibleFrom="sm">
+          <Brand />
+        </Box>
         <Stack gap={2} mt="xs">
           {TABS.map((t) => {
             const Icon = t.icon
@@ -140,7 +156,10 @@ export function App() {
                 active={tab === t.key}
                 label={t.label}
                 leftSection={<Icon size={17} />}
-                onClick={() => setTab(t.key)}
+                onClick={() => {
+                  setTab(t.key)
+                  setNavOpened(false)
+                }}
                 variant="light"
                 style={{ borderRadius: 9, fontWeight: 500 }}
               />
@@ -174,7 +193,7 @@ export function App() {
       </AppShell.Navbar>
 
       <AppShell.Main>
-        <Box px={30} py={22} style={{ maxWidth: 1180 }}>
+        <Box px={{ base: 16, sm: 30 }} py={22} style={{ maxWidth: 1180 }}>
           <Box mb={20}>
             <Title order={1} fz={22} fw={650}>
               {cur.title}
@@ -188,6 +207,7 @@ export function App() {
             <Profiles dts={meta.scriptDts} renderers={meta.renderers} hasAgent={!!meta.hasAgent} />
           )}
           {tab === 'agent' && <Agent hasAgent={!!meta?.hasAgent} />}
+          {tab === 'mcp' && meta && <Mcp meta={meta.mcp} />}
         </Box>
       </AppShell.Main>
     </AppShell>

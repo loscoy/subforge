@@ -5,7 +5,10 @@ import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type Convers
 import type { NodeChecker } from '../health.js'
 import type { AgentRunner } from '../agent/index.js'
 import type { ServerConfig } from '../config.js'
+import { handleMcpHttpRequest } from '../mcp/http.js'
+import { timingSafeEqual } from '../security.js'
 import type { Profile, StoredTemplate, Storage, Subscription } from '../storage/index.js'
+import { buildTools } from '../tools/registry.js'
 import {
   buildProfileOutput,
   collectRawSubscriptions,
@@ -34,6 +37,7 @@ const EMPTY_PROFILE: ConversionProfile = {
 export function createApp(deps: AppDeps): Hono {
   const { storage, runner, config } = deps
   const app = new Hono()
+  const mcpTools = buildTools({ checkNodes: !!deps.checkNodes }).map(({ name, description }) => ({ name, description }))
   app.use('/api/*', cors())
 
   // ---- 公开：分享出口 ----
@@ -55,6 +59,25 @@ export function createApp(deps: AppDeps): Hono {
   })
 
   app.get('/healthz', (c) => c.json({ ok: true }))
+
+  // ---- 远端 MCP（独立口令，始终失败关闭） ----
+  app.all('/mcp', async (c) => {
+    if (!config.mcpToken) {
+      return c.json({ error: 'Remote MCP is disabled because MCP_TOKEN is not configured.' }, 503)
+    }
+    if (c.req.method !== 'POST') {
+      c.header('Allow', 'POST')
+      return c.json({ error: 'Method not allowed' }, 405)
+    }
+
+    const match = c.req.header('Authorization')?.match(/^Bearer\s+(.+)$/i)
+    if (!(await timingSafeEqual(match?.[1] ?? '', config.mcpToken))) {
+      c.header('WWW-Authenticate', 'Bearer')
+      return c.json({ error: 'Unauthorized' }, 401)
+    }
+
+    return handleMcpHttpRequest(c.req.raw, { storage, runner, checkNodes: deps.checkNodes })
+  })
 
   // ---- 管理 API（鉴权：默认失败关闭） ----
   const api = new Hono()
@@ -80,7 +103,17 @@ export function createApp(deps: AppDeps): Hono {
   }
 
   api.get('/meta', (c) =>
-    c.json({ renderers: listRenderers(), hasAgent: !!deps.makeAgent, scriptDts: SCRIPT_DTS }),
+    c.json({
+      renderers: listRenderers(),
+      hasAgent: !!deps.makeAgent,
+      scriptDts: SCRIPT_DTS,
+      mcp: {
+        enabled: !!config.mcpToken,
+        endpoint: '/mcp',
+        transport: 'streamable-http' as const,
+        tools: mcpTools,
+      },
+    }),
   )
 
   // 订阅

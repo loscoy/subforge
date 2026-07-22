@@ -8,7 +8,7 @@ import { buildTools, type ToolContext } from '../tools/registry.js'
 export function createMcpServer(ctx: ToolContext): McpServer {
   const server = new McpServer({ name: 'subforge', version: '0.1.0' })
 
-  for (const t of buildTools()) {
+  for (const t of buildTools({ checkNodes: !!ctx.checkNodes })) {
     server.tool(t.name, t.description, (t.schema as any).shape ?? {}, async (args: unknown) => {
       try {
         const result = await t.handler(args as never, ctx)

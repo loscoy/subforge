@@ -32,3 +32,6 @@ export const IInbox = (p: IP) => <S {...p}><polyline points="22 12 16 12 14 15 1
 export const IBrand = (p: IP) => <S {...p}><path d="m18 16 4-4-4-4" /><path d="m6 8-4 4 4 4" /><path d="m14.5 4-5 16" /></S>
 export const ISun = (p: IP) => <S {...p}><circle cx="12" cy="12" r="4" /><path d="M12 2v2" /><path d="M12 20v2" /><path d="m4.93 4.93 1.41 1.41" /><path d="m17.66 17.66 1.41 1.41" /><path d="M2 12h2" /><path d="M20 12h2" /><path d="m6.34 17.66-1.41 1.41" /><path d="m19.07 4.93-1.41 1.41" /></S>
 export const IMoon = (p: IP) => <S {...p}><path d="M12 3a6 6 0 0 0 9 9 9 9 0 1 1-9-9Z" /></S>
+export const IPlug = (p: IP) => <S {...p}><path d="M12 22v-5" /><path d="M9 8V2" /><path d="M15 8V2" /><path d="M18 8v5a6 6 0 0 1-12 0V8Z" /></S>
+export const ICopy = (p: IP) => <S {...p}><rect width="14" height="14" x="8" y="8" rx="2" /><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" /></S>
+export const ICheck = (p: IP) => <S {...p}><path d="m20 6-11 11-5-5" /></S>

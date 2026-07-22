@@ -83,4 +83,10 @@ export interface Meta {
   renderers: string[]
   hasAgent: boolean
   scriptDts: string
+  mcp: {
+    enabled: boolean
+    endpoint: string
+    transport: 'streamable-http'
+    tools: { name: string; description: string }[]
+  }
 }

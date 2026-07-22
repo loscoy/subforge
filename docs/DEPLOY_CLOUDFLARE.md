@@ -9,6 +9,7 @@ SubForge 支持两种部署形态，共享同一套 `core` 逻辑与工具：
 | 前端 | 后端托管 dist | `assets` 绑定托管 dist（SPA） |
 | 节点测活 | ✅（node:net） | ❌ 不支持（边缘无原始 TCP），端点返回 501 |
 | Agent | ✅ | ✅（同 OpenAI 兼容接口） |
+| 远端 MCP | ✅（Streamable HTTP） | ✅（Streamable HTTP，不含 `test_nodes`） |
 
 ## 步骤
 
@@ -22,22 +23,21 @@ cd packages/server
 # 2. 创建 D1，把输出的 database_id 填进 wrangler.jsonc
 npx wrangler d1 create subforge
 
-# 3. 建表
-npm run cf:migrate:remote      # = wrangler d1 migrations apply subforge --remote
-
-# 4.（可选）配置 Agent 与管理口令
+# 3.（可选）配置 Agent、管理口令与远端 MCP
 npx wrangler secret put OPENAI_BASE_URL
 npx wrangler secret put OPENAI_API_KEY
 npx wrangler secret put OPENAI_MODEL
 npx wrangler secret put ADMIN_TOKEN
+npx wrangler secret put MCP_TOKEN
 
-# 5. 部署
-npm run cf:deploy              # = wrangler deploy
+# 4. 在 packages/server/.cf-release.json 配置 account_id / database_id
+# 5. 构建、迁移并部署（唯一推荐方式）
+npm run cf:release
 ```
 
 本地开发：`npm run cf:migrate:local` 后 `npm run cf:dev`。
 
-> ⚠️ **务必用 `wrangler secret put` 设置 `OPENAI_*` / `ADMIN_TOKEN`，不要在 dashboard 里设「明文变量(Variables)」。**
+> ⚠️ **务必用 `wrangler secret put` 设置 `OPENAI_*` / `ADMIN_TOKEN` / `MCP_TOKEN`，不要在 dashboard 里设「明文变量(Variables)」。**
 > `wrangler deploy` 会用配置文件里的 `vars` 覆盖明文变量——配置里没有的会被清空；而加密 secret 跨部署保留。
 > 一键发布：`npm run cf:release`（见下）。
 
@@ -45,6 +45,7 @@ npm run cf:deploy              # = wrangler deploy
 
 - **脚本沙箱**：边缘用 QuickJS-wasm，**仅支持同步脚本**（不支持 `await`）；`utils` 通过 host 桥调用与 Node 端完全相同的实现（跨桥参数走 JSON，故正则请用字符串形式传给 `utils.keep/drop`）。
 - **测活**：`/api/profiles/:id/healthcheck` 与 `test_nodes` 工具依赖原始 TCP（node:net），边缘不可用（返回 501）；需要测活请用 Node 部署。
+- **远端 MCP**：配置 `MCP_TOKEN` 后通过 `/mcp` 提供 Streamable HTTP；边缘部署会从工具列表中移除 `test_nodes`。token 仅通过 `Authorization: Bearer` 传递。
 - **wasm 载入**：workerd 禁止运行时从字节编译 wasm，故构建时把 QuickJS 的 `.wasm` 作为 CompiledWasm 模块 `import` 进来（启动期编译），再经 `newVariant({ wasmModule })` 注入。`.wasm` 需位于 worker 包内，`npm run cf:dev` / `cf:deploy` 会用 `precf:*` 钩子自动把它从 node_modules 拷到 `src/quickjs.wasm`（已 gitignore）。
 
 ## 验证状态
