@@ -126,6 +126,50 @@ body {
   color: var(--mantine-color-violet-light-color);
 }
 
+/* ---------- 应用骨架 ---------- */
+/* 最小高度用 svh（小视口）而非 dvh：手机浏览器工具栏收起时 dvh 动态变大，
+   会把不足一屏的页面撑出一段「能下滑的空白」。 */
+.app-shell {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+.app-row {
+  display: flex;
+  flex: 1;
+  align-items: stretch;
+  min-height: 0;
+}
+.app-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 撑满视口模式：整页高度锁死，滚动交给内部区域自己管。
+   只在宽屏启用——窄屏是单列堆叠，锁死高度只会把每块都压扁。 */
+@media (min-width: 48.0625em) {
+  .app-shell[data-fill] {
+    height: 100svh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .app-shell[data-fill] .page-body {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    /* 让内部滚动容器接管，页面本身不再产生滚动条 */
+    overflow: hidden;
+  }
+  .app-shell[data-fill] .page-body > * {
+    flex: 1;
+    min-height: 0;
+  }
+}
+
 /* ---------- 页面骨架 ---------- */
 /* 标题栏与内容区共用同一条内容列：两者宽度一致，卡片才不会「缩在左上角」 */
 .page-head,
@@ -362,6 +406,29 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
+}
+/* 撑满模式下左右两栏各自滚，卡片不被内容顶高 */
+@media (min-width: 48.0625em) {
+  .app-shell[data-fill] .profiles-card {
+    min-height: 0;
+  }
+  .app-shell[data-fill] .profiles-list {
+    min-height: 0;
+    overflow-y: auto;
+  }
+  /* 详情列本身不滚：头部与区块 tab 固定，滚动交给下面每个区块自己 */
+  .app-shell[data-fill] .profiles-detail,
+  .app-shell[data-fill] .profile-detail-body {
+    min-height: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  /* 除脚本外的区块内容较短，各自滚动即可 */
+  .app-shell[data-fill] .profile-detail-body > :last-child {
+    min-height: 0;
+    overflow-y: auto;
+  }
 }
 .profiles-detail > * {
   min-width: 0;
@@ -783,6 +850,38 @@ body {
   border: 1px solid var(--mantine-color-default-border);
   border-radius: 8px;
   overflow: hidden;
+  /* Monaco 用 height:100%，定高由这里给 */
+  height: 360px;
+}
+/* 撑满模式：编辑器吃满剩余高度，预览列自己滚 */
+@media (min-width: 48.0625em) {
+  .app-shell[data-fill] .script-pane {
+    flex: 1;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .app-shell[data-fill] .script-pane > :last-child {
+    flex: 1;
+    min-height: 0;
+  }
+  .app-shell[data-fill] .script-editor {
+    min-height: 0;
+  }
+  .app-shell[data-fill] .script-editor-col {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+  .app-shell[data-fill] .editor-wrap {
+    flex: 1;
+    height: auto;
+    min-height: 0;
+  }
+  .app-shell[data-fill] .script-preview-col {
+    min-height: 0;
+    overflow-y: auto;
+  }
 }
 .script-preview {
   min-height: 112px;

@@ -163,9 +163,9 @@ export function App() {
   const agentProfile = tab === 'profiles' ? profileCtx : null
 
   return (
-    // 最小高度用 svh（小视口）而非 dvh：手机浏览器工具栏收起时 dvh 动态变大，
-    // 会把不足一屏的页面撑出一段「能下滑的空白」。
-    <Box style={{ minHeight: '100svh', display: 'flex', flexDirection: 'column' }}>
+    // 配置页走「撑满视口」模式：整页不滚，滚动收进编辑器 / 详情各自的区域，
+    // 编辑器才能吃到尽可能多的高度。其余页面是普通文档流，按内容长短自然滚。
+    <Box className="app-shell" data-fill={tab === 'profiles' || undefined}>
       {/* 顶栏导航 */}
       <Box component="header" className="topbar">
         <Box className="topbar-brand">
@@ -222,9 +222,9 @@ export function App() {
         </Group>
       </Box>
 
-      <Box style={{ display: 'flex', flex: 1, alignItems: 'stretch' }}>
+      <Box className="app-row">
         {/* 主内容列 */}
-        <Box style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <Box className="app-main">
           <Group justify="space-between" align="flex-end" gap={16} px={28} pt={22} className="page-head">
             <Box>
               <Title order={1} fz={21} fw={600}>

@@ -17,7 +17,14 @@ describe('settings · 读写与三态合并', () => {
   it('空库返回默认值', async () => {
     const s = await loadSettings(fresh(), KEY)
     expect(s.agent).toEqual({ baseURL: undefined, model: undefined, apiKey: undefined })
-    expect(s.web).toMatchObject({ provider: undefined, searchEngine: 'auto', fetchEngine: 'auto', maxToolCalls: 5, maxResults: 5 })
+    expect(s.web).toMatchObject({
+      searchProvider: undefined,
+      fetchProvider: undefined,
+      searchEngine: 'auto',
+      fetchEngine: 'auto',
+      maxToolCalls: 5,
+      maxResults: 5,
+    })
     expect(s.mcpToken).toBeUndefined()
   })
 
@@ -67,12 +74,31 @@ describe('settings · 读写与三态合并', () => {
     await expect(loadSettings(storage, KEY)).resolves.toMatchObject({ mcpToken: undefined })
   })
 
-  it('provider 传 null 表示关闭联网', async () => {
+  it('provider 传 null 表示关掉那个能力，两个能力互不影响', async () => {
     const storage = fresh()
-    await saveSettings(storage, KEY, { web: { provider: 'openrouter' } })
-    expect((await loadSettings(storage, KEY)).web.provider).toBe('openrouter')
-    await saveSettings(storage, KEY, { web: { provider: null } })
-    expect((await loadSettings(storage, KEY)).web.provider).toBeUndefined()
+    await saveSettings(storage, KEY, { web: { searchProvider: 'openrouter', fetchProvider: 'exa' } })
+    let web = (await loadSettings(storage, KEY)).web
+    expect([web.searchProvider, web.fetchProvider]).toEqual(['openrouter', 'exa'])
+
+    await saveSettings(storage, KEY, { web: { fetchProvider: null } })
+    web = (await loadSettings(storage, KEY)).web
+    expect(web.searchProvider).toBe('openrouter') // 没动它就不该变
+    expect(web.fetchProvider).toBeUndefined()
+  })
+
+  it('旧结构的单一 provider 读取时铺开到两个能力', async () => {
+    const storage = fresh()
+    // 直接写入旧格式，模拟升级前存下的设置
+    await storage.setSettings(JSON.stringify({ web: { provider: 'tavily', maxResults: 7 } }))
+    const web = (await loadSettings(storage, KEY)).web
+    expect([web.searchProvider, web.fetchProvider]).toEqual(['tavily', 'tavily'])
+    expect(web.maxResults).toBe(7)
+
+    // 保存后写回新结构，旧字段不再留存
+    await saveSettings(storage, KEY, { web: { searchProvider: 'exa' } })
+    const raw = JSON.parse((await storage.getSettings())!)
+    expect(raw.web.provider).toBeUndefined()
+    expect([raw.web.searchProvider, raw.web.fetchProvider]).toEqual(['exa', 'tavily'])
   })
 })
 
@@ -97,15 +123,31 @@ describe('settings · 派生配置', () => {
     expect(toAgentConfig(await loadSettings(storage, KEY))).toMatchObject({ baseURL: 'https://a/v1', model: 'm', apiKey: 'sk-1' })
   })
 
-  it('联网工具：未选 provider 不启用；tavily 缺 key 失败关闭', async () => {
+  it('联网工具：两个能力都没选供应商才算不启用', async () => {
     const storage = fresh()
     expect(toWebToolsConfig(await loadSettings(storage, KEY))).toBeUndefined()
 
-    await saveSettings(storage, KEY, { web: { provider: 'tavily' } })
-    expect(toWebToolsConfig(await loadSettings(storage, KEY))).toBeUndefined()
+    await saveSettings(storage, KEY, { web: { searchProvider: 'tavily', tavilyApiKey: 'tk' } })
+    expect(toWebToolsConfig(await loadSettings(storage, KEY))).toMatchObject({
+      searchProvider: 'tavily',
+      fetchProvider: undefined,
+      tavilyApiKey: 'tk',
+    })
+  })
 
-    await saveSettings(storage, KEY, { web: { tavilyApiKey: 'tk' } })
-    expect(toWebToolsConfig(await loadSettings(storage, KEY))).toMatchObject({ provider: 'tavily', apiKey: 'tk' })
+  it('两个供应商的 key 各存各的，互不覆盖', async () => {
+    const storage = fresh()
+    await saveSettings(storage, KEY, {
+      web: { searchProvider: 'exa', fetchProvider: 'tavily', exaApiKey: 'ek', tavilyApiKey: 'tk' },
+    })
+    const cfg = toWebToolsConfig(await loadSettings(storage, KEY))!
+    expect(cfg).toMatchObject({ searchProvider: 'exa', fetchProvider: 'tavily', exaApiKey: 'ek', tavilyApiKey: 'tk' })
+
+    // 只清 exa 的 key，tavily 的不受影响
+    await saveSettings(storage, KEY, { web: { exaApiKey: null } })
+    const after = toWebToolsConfig(await loadSettings(storage, KEY))!
+    expect(after.exaApiKey).toBeUndefined()
+    expect(after.tavilyApiKey).toBe('tk')
   })
 })
 

@@ -4,6 +4,7 @@ import {
   Box,
   Button,
   Card,
+  CopyButton,
   Group,
   NativeSelect,
   NumberInput,
@@ -39,6 +40,7 @@ function SecretInput({
   draft,
   disabled,
   onChange,
+  extraActions,
 }: {
   label: string
   description?: string
@@ -47,6 +49,7 @@ function SecretInput({
   draft: string | null | undefined
   disabled?: boolean
   onChange: (next: SecretPatch) => void
+  extraActions?: React.ReactNode
 }) {
   const cleared = draft === null
   const placeholder = cleared
@@ -64,7 +67,7 @@ function SecretInput({
         value={typeof draft === 'string' ? draft : ''}
         onChange={(e) => onChange(e.currentTarget.value || undefined)}
       />
-      {(view.configured || cleared) && !disabled && (
+      {!disabled && (
         <Group gap={8} mt={6}>
           {cleared ? (
             <>
@@ -76,14 +79,27 @@ function SecretInput({
               </Button>
             </>
           ) : (
-            <Button variant="subtle" color="red" size="compact-xs" onClick={() => onChange(null)}>
-              清除
-            </Button>
+            <>
+              {extraActions}
+              {view.configured && (
+                <Button variant="subtle" color="red" size="compact-xs" onClick={() => onChange(null)}>
+                  清除
+                </Button>
+              )}
+            </>
           )}
         </Group>
       )}
     </Box>
   )
+}
+
+/** 32 字节随机数转 base64url，够强且没有需要转义的字符。 */
+function generateToken(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  let binary = ''
+  for (const b of bytes) binary += String.fromCharCode(b)
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
 }
 
 function SectionCard({
@@ -129,9 +145,10 @@ function SectionCard({
 }
 
 const PROVIDER_OPTIONS = [
-  { value: '', label: '关闭（Agent 不联网）' },
+  { value: '', label: '关闭' },
   { value: 'openrouter', label: 'OpenRouter 服务端工具' },
   { value: 'tavily', label: 'Tavily' },
+  { value: 'exa', label: 'Exa' },
 ]
 
 export function Settings({ onSaved }: { onSaved?: () => void }) {
@@ -166,7 +183,13 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
   const agentField = (k: 'baseURL' | 'model') => patch.agent?.[k] ?? data.agent[k]
   const webField = <K extends 'searchEngine' | 'fetchEngine' | 'maxToolCalls' | 'maxResults'>(k: K) =>
     patch.web?.[k] ?? data.web[k]
-  const provider = patch.web?.provider !== undefined ? patch.web.provider : data.web.provider
+  // null 是有效值（关闭），不能用 ?? 兜底
+  const providerOf = (k: 'searchProvider' | 'fetchProvider') =>
+    patch.web?.[k] !== undefined ? patch.web[k] : data.web[k]
+  const searchProvider = providerOf('searchProvider')
+  const fetchProvider = providerOf('fetchProvider')
+  const usesProvider = (p: WebProvider) => searchProvider === p || fetchProvider === p
+  const anyWebEnabled = !!searchProvider || !!fetchProvider
 
   const patchAgent = (next: Partial<NonNullable<SettingsPatch['agent']>>) =>
     setPatch((p) => ({ ...p, agent: { ...p.agent, ...next } }))
@@ -256,15 +279,31 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
         </Group>
       </SectionCard>
 
-      <SectionCard icon={<IPlug size={17} />} title="联网工具" sub="给 Agent 的 web_search / web_fetch">
-        <NativeSelect
-          label="供应商"
-          data={PROVIDER_OPTIONS}
-          value={provider ?? ''}
-          onChange={(e) => patchWeb({ provider: (e.currentTarget.value || null) as WebProvider | null })}
-        />
-        {provider === 'openrouter' && (
-          <Box className="form-grid form-grid-2">
+      <SectionCard icon={<IPlug size={17} />} title="联网工具" sub="搜索与抓取分别选供应商，可以混搭">
+        <Box className="form-grid form-grid-2">
+          <NativeSelect
+            label="搜索（web_search）"
+            data={PROVIDER_OPTIONS}
+            value={searchProvider ?? ''}
+            onChange={(e) => patchWeb({ searchProvider: (e.currentTarget.value || null) as WebProvider | null })}
+          />
+          <NativeSelect
+            label="抓取（web_fetch）"
+            data={PROVIDER_OPTIONS}
+            value={fetchProvider ?? ''}
+            onChange={(e) => patchWeb({ fetchProvider: (e.currentTarget.value || null) as WebProvider | null })}
+          />
+        </Box>
+
+        {usesProvider('openrouter') && (
+          <Alert color="gray" variant="light">
+            OpenRouter 的工具由网关服务端执行，**只有当上面的模型 Base URL 指向 OpenRouter 时才生效**。
+            换成直连 OpenAI 或本地模型的话，请改用 Tavily / Exa（那两个由本实例自己调用，与模型供应商无关）。
+          </Alert>
+        )}
+
+        <Box className="form-grid form-grid-2">
+          {searchProvider === 'openrouter' && (
             <NativeSelect
               label="搜索引擎"
               description="auto 交给 OpenRouter 自选"
@@ -272,6 +311,8 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
               value={webField('searchEngine')}
               onChange={(e) => patchWeb({ searchEngine: e.currentTarget.value })}
             />
+          )}
+          {fetchProvider === 'openrouter' && (
             <NativeSelect
               label="抓取引擎"
               description="不含 perplexity，它只做搜索"
@@ -279,19 +320,31 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
               value={webField('fetchEngine')}
               onChange={(e) => patchWeb({ fetchEngine: e.currentTarget.value })}
             />
-          </Box>
-        )}
-        {provider === 'tavily' && (
+          )}
+        </Box>
+
+        {usesProvider('tavily') && (
           <SecretInput
             label="Tavily API Key"
-            description="缺 key 时联网工具不会注册"
+            description="缺 key 时用到 Tavily 的那个能力不会注册"
             view={data.web.tavilyApiKey}
             draft={patch.web?.tavilyApiKey}
             disabled={lockSecrets}
             onChange={(tavilyApiKey) => patchWeb({ tavilyApiKey })}
           />
         )}
-        {provider && (
+        {usesProvider('exa') && (
+          <SecretInput
+            label="Exa API Key"
+            description="缺 key 时用到 Exa 的那个能力不会注册"
+            view={data.web.exaApiKey}
+            draft={patch.web?.exaApiKey}
+            disabled={lockSecrets}
+            onChange={(exaApiKey) => patchWeb({ exaApiKey })}
+          />
+        )}
+
+        {anyWebEnabled && (
           <Box className="form-grid form-grid-2">
             <NumberInput
               label="单轮调用上限"
@@ -315,12 +368,38 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
       <SectionCard icon={<IKey size={17} />} title="远端 MCP" sub="外部 Agent 连接本实例的独立口令">
         <SecretInput
           label="MCP Token"
-          description="清除即关闭远端 MCP。与管理口令 ADMIN_TOKEN 相互独立。"
+          description="点「生成」即可，不用自己想。清除即关闭远端 MCP，与管理口令 ADMIN_TOKEN 相互独立。"
           view={data.mcpToken}
           draft={patch.mcpToken}
           disabled={lockSecrets}
           onChange={(mcpToken) => setPatch((p) => ({ ...p, mcpToken }))}
+          extraActions={
+            <>
+              <Button
+                variant="subtle"
+                size="compact-xs"
+                onClick={() => setPatch((p) => ({ ...p, mcpToken: generateToken() }))}
+              >
+                {data.mcpToken.configured ? '重新生成' : '生成'}
+              </Button>
+              {typeof patch.mcpToken === 'string' && (
+                <CopyButton value={patch.mcpToken} timeout={1600}>
+                  {({ copied, copy }) => (
+                    <Button variant="subtle" size="compact-xs" onClick={copy}>
+                      {copied ? '已复制' : '复制'}
+                    </Button>
+                  )}
+                </CopyButton>
+              )}
+            </>
+          }
         />
+        {typeof patch.mcpToken === 'string' && (
+          <Alert color="orange" variant="light" icon={<IAlert size={16} />}>
+            保存后这个口令就只剩掩码了，读不回来。现在把它复制出去填进 Claude Code / Codex 的连接配置——
+            忘了就重新生成一个，两边同步改即可。
+          </Alert>
+        )}
       </SectionCard>
 
       <Card>

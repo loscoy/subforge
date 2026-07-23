@@ -93,8 +93,9 @@ export interface Meta {
 
 // ---------- 运行时设置 ----------
 
-export const WEB_PROVIDERS = ['openrouter', 'tavily'] as const
+export const WEB_PROVIDERS = ['openrouter', 'tavily', 'exa'] as const
 export type WebProvider = (typeof WEB_PROVIDERS)[number]
+/** 仅 provider=openrouter 时有意义 */
 export const SEARCH_ENGINES = ['auto', 'native', 'exa', 'firecrawl', 'parallel', 'perplexity'] as const
 /** perplexity 只做搜索，不适用于抓取 */
 export const FETCH_ENGINES = ['auto', 'native', 'exa', 'firecrawl', 'parallel'] as const
@@ -108,12 +109,14 @@ export interface SecretView {
 export interface Settings {
   agent: { baseURL: string; model: string; apiKey: SecretView }
   web: {
-    provider: WebProvider | null
+    searchProvider: WebProvider | null
+    fetchProvider: WebProvider | null
     searchEngine: string
     fetchEngine: string
     maxToolCalls: number
     maxResults: number
     tavilyApiKey: SecretView
+    exaApiKey: SecretView
   }
   mcpToken: SecretView
   /** false 表示部署没设 SETTINGS_KEY，密钥存不进去 */
@@ -133,12 +136,14 @@ export type SecretPatch = string | null | undefined
 export interface SettingsPatch {
   agent?: { baseURL?: string; model?: string; apiKey?: SecretPatch }
   web?: {
-    provider?: WebProvider | null
+    searchProvider?: WebProvider | null
+    fetchProvider?: WebProvider | null
     searchEngine?: string
     fetchEngine?: string
     maxToolCalls?: number
     maxResults?: number
     tavilyApiKey?: SecretPatch
+    exaApiKey?: SecretPatch
   }
   mcpToken?: SecretPatch
 }

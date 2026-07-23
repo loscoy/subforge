@@ -1,4 +1,4 @@
-import Editor, { type Monaco } from '@monaco-editor/react'
+import Editor, { type Monaco, type OnMount } from '@monaco-editor/react'
 import { Badge, Box, Group, SimpleGrid, Skeleton, Stack, Text, useMantineColorScheme } from '@mantine/core'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
@@ -17,6 +17,23 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [running, setRunning] = useState(false)
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
+
+  // 编辑器高度由外层 flex 决定（撑满模式下随视口变化）。Monaco 自带的
+  // automaticLayout 在这套嵌套 flex 里不跟手，索性自己观察容器尺寸重排。
+  // 必须把量到的尺寸显式传给 layout()：无参调用会让 Monaco 去量它自己
+  // 设过高度的那层容器，容器缩小时量不回来，编辑器就一直保持旧高度。
+  useEffect(() => {
+    const wrap = wrapRef.current
+    if (!wrap) return
+    const observer = new ResizeObserver(([entry]) => {
+      const box = entry?.contentRect
+      if (box && box.height > 0) editorRef.current?.layout({ width: box.width, height: box.height })
+    })
+    observer.observe(wrap)
+    return () => observer.disconnect()
+  }, [])
 
   const runPreview = (script: string) => {
     setRunning(true)
@@ -49,16 +66,22 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
   }
 
   return (
-    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md">
-      <Box>
-        <div className="editor-wrap">
+    // 高度由 .editor-wrap 给（普通模式定高 360px，撑满模式 flex 吃满剩余空间），
+    // Monaco 自己用 100% 跟随，免得 height prop 的内联样式盖掉 CSS。
+    <SimpleGrid cols={{ base: 1, md: 2 }} spacing="md" className="script-editor">
+      <Box className="script-editor-col">
+        <div className="editor-wrap" ref={wrapRef}>
           <Editor
-            height="360px"
+            height="100%"
             defaultLanguage="javascript"
             theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
             value={value}
             onChange={handleChange}
             beforeMount={beforeMount}
+            onMount={(editor) => {
+              editorRef.current = editor
+              editor.layout()
+            }}
             options={{ minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false }}
           />
         </div>
@@ -67,7 +90,7 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
           <span className="mono">console</span> / <span className="mono">params</span>。改动后自动预览。
         </Text>
       </Box>
-      <Box>
+      <Box className="script-preview-col">
         <Box className="script-preview" mb="xs">
           <Group justify="space-between" mb={6}>
             <Text fw={600} fz="sm">

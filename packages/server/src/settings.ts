@@ -19,8 +19,8 @@ import type { Storage } from './storage/types.js'
  * 解密不出来就当没配置——见 secrets.ts。
  */
 
-export const WEB_PROVIDERS = ['openrouter', 'tavily'] as const
-/** OpenRouter 搜索引擎候选 */
+export const WEB_PROVIDERS = ['openrouter', 'tavily', 'exa'] as const
+/** OpenRouter 搜索引擎候选（仅 provider=openrouter 时有意义） */
 export const SEARCH_ENGINES = ['auto', 'native', 'exa', 'firecrawl', 'parallel', 'perplexity'] as const
 /** 抓取引擎候选：perplexity 只做搜索，不适用于抓取，故不在此列 */
 export const FETCH_ENGINES = ['auto', 'native', 'exa', 'firecrawl', 'parallel'] as const
@@ -38,12 +38,15 @@ export interface Settings {
     apiKey?: string
   }
   web: {
-    provider?: WebProvider
+    /** 搜索与抓取各自选供应商，可以混搭（如 search=openrouter + fetch=exa） */
+    searchProvider?: WebProvider
+    fetchProvider?: WebProvider
     searchEngine: string
     fetchEngine: string
     maxToolCalls: number
     maxResults: number
     tavilyApiKey?: string
+    exaApiKey?: string
   }
   mcpToken?: string
 }
@@ -52,12 +55,16 @@ export interface Settings {
 interface StoredSettings {
   agent?: { baseURL?: string; model?: string; apiKey?: string }
   web?: {
+    searchProvider?: WebProvider
+    fetchProvider?: WebProvider
+    /** 旧结构：单一 provider 同时供给搜索与抓取。读取时迁移到上面两个字段。 */
     provider?: WebProvider
     searchEngine?: string
     fetchEngine?: string
     maxToolCalls?: number
     maxResults?: number
     tavilyApiKey?: string
+    exaApiKey?: string
   }
   mcpToken?: string
 }
@@ -71,12 +78,14 @@ export interface SecretView {
 export interface SettingsView {
   agent: { baseURL: string; model: string; apiKey: SecretView }
   web: {
-    provider: WebProvider | null
+    searchProvider: WebProvider | null
+    fetchProvider: WebProvider | null
     searchEngine: string
     fetchEngine: string
     maxToolCalls: number
     maxResults: number
     tavilyApiKey: SecretView
+    exaApiKey: SecretView
   }
   mcpToken: SecretView
   /** SETTINGS_KEY 是否可用；false 时密钥无法保存，前端应禁用相关输入并说明原因 */
@@ -98,12 +107,14 @@ export const settingsPatchSchema = z.object({
     .optional(),
   web: z
     .object({
-      provider: z.union([z.enum(WEB_PROVIDERS), z.null()]).optional(),
+      searchProvider: z.union([z.enum(WEB_PROVIDERS), z.null()]).optional(),
+      fetchProvider: z.union([z.enum(WEB_PROVIDERS), z.null()]).optional(),
       searchEngine: z.enum(SEARCH_ENGINES).optional(),
       fetchEngine: z.enum(FETCH_ENGINES).optional(),
       maxToolCalls: z.number().int().min(1).max(25).optional(),
       maxResults: z.number().int().min(1).max(25).optional(),
       tavilyApiKey: secretPatch,
+      exaApiKey: secretPatch,
     })
     .optional(),
   mcpToken: secretPatch,
@@ -123,7 +134,15 @@ function parseStored(raw: string | undefined): StoredSettings {
   }
 }
 
-function resolve(stored: StoredSettings, secrets: { apiKey?: string; tavilyApiKey?: string; mcpToken?: string }): Settings {
+interface ResolvedSecrets {
+  apiKey?: string
+  tavilyApiKey?: string
+  exaApiKey?: string
+  mcpToken?: string
+}
+
+function resolve(stored: StoredSettings, secrets: ResolvedSecrets): Settings {
+  const web = stored.web
   return {
     agent: {
       baseURL: stored.agent?.baseURL || undefined,
@@ -131,12 +150,15 @@ function resolve(stored: StoredSettings, secrets: { apiKey?: string; tavilyApiKe
       apiKey: secrets.apiKey,
     },
     web: {
-      provider: stored.web?.provider,
-      searchEngine: stored.web?.searchEngine ?? 'auto',
-      fetchEngine: stored.web?.fetchEngine ?? 'auto',
-      maxToolCalls: stored.web?.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS,
-      maxResults: stored.web?.maxResults ?? DEFAULT_MAX_RESULTS,
+      // 旧结构里单一的 provider 同时供给两个能力，迁移时按此语义铺开
+      searchProvider: web?.searchProvider ?? web?.provider,
+      fetchProvider: web?.fetchProvider ?? web?.provider,
+      searchEngine: web?.searchEngine ?? 'auto',
+      fetchEngine: web?.fetchEngine ?? 'auto',
+      maxToolCalls: web?.maxToolCalls ?? DEFAULT_MAX_TOOL_CALLS,
+      maxResults: web?.maxResults ?? DEFAULT_MAX_RESULTS,
       tavilyApiKey: secrets.tavilyApiKey,
+      exaApiKey: secrets.exaApiKey,
     },
     mcpToken: secrets.mcpToken,
   }
@@ -145,12 +167,14 @@ function resolve(stored: StoredSettings, secrets: { apiKey?: string; tavilyApiKe
 /** 读取并解密设置。解不开的密钥字段一律视为未配置。 */
 export async function loadSettings(storage: Storage, keyMaterial: string | undefined): Promise<Settings> {
   const stored = parseStored(await storage.getSettings())
-  const [apiKey, tavilyApiKey, mcpToken] = await Promise.all([
-    stored.agent?.apiKey ? decryptSecret(stored.agent.apiKey, keyMaterial) : undefined,
-    stored.web?.tavilyApiKey ? decryptSecret(stored.web.tavilyApiKey, keyMaterial) : undefined,
-    stored.mcpToken ? decryptSecret(stored.mcpToken, keyMaterial) : undefined,
+  const decrypt = (blob: string | undefined) => (blob ? decryptSecret(blob, keyMaterial) : Promise.resolve(undefined))
+  const [apiKey, tavilyApiKey, exaApiKey, mcpToken] = await Promise.all([
+    decrypt(stored.agent?.apiKey),
+    decrypt(stored.web?.tavilyApiKey),
+    decrypt(stored.web?.exaApiKey),
+    decrypt(stored.mcpToken),
   ])
-  return resolve(stored, { apiKey, tavilyApiKey, mcpToken })
+  return resolve(stored, { apiKey, tavilyApiKey, exaApiKey, mcpToken })
 }
 
 /** 密钥三态合并：undefined 保持原密文，null 清除，字符串加密后写入。 */
@@ -163,6 +187,12 @@ async function mergeSecret(
   if (patch === null) return undefined
   if (!keyMaterial) throw new SettingsKeyMissingError()
   return encryptSecret(patch, keyMaterial)
+}
+
+/** provider 与密钥同为三态：缺席=不变，值=设为该供应商，null=关掉这个能力。 */
+function mergeProvider(current: WebProvider | undefined, patch: WebProvider | null | undefined) {
+  if (patch === undefined) return current
+  return patch === null ? undefined : patch
 }
 
 export class SettingsKeyMissingError extends Error {
@@ -186,13 +216,15 @@ export async function saveSettings(
       apiKey: await mergeSecret(stored.agent?.apiKey, patch.agent?.apiKey, keyMaterial),
     },
     web: {
-      // provider 显式传 null 表示关闭联网
-      provider: patch.web?.provider === null ? undefined : (patch.web?.provider ?? stored.web?.provider),
+      // 写回时只保留新结构：旧的单一 provider 字段就此消失，不留双份真相
+      searchProvider: mergeProvider(stored.web?.searchProvider ?? stored.web?.provider, patch.web?.searchProvider),
+      fetchProvider: mergeProvider(stored.web?.fetchProvider ?? stored.web?.provider, patch.web?.fetchProvider),
       searchEngine: patch.web?.searchEngine ?? stored.web?.searchEngine,
       fetchEngine: patch.web?.fetchEngine ?? stored.web?.fetchEngine,
       maxToolCalls: patch.web?.maxToolCalls ?? stored.web?.maxToolCalls,
       maxResults: patch.web?.maxResults ?? stored.web?.maxResults,
       tavilyApiKey: await mergeSecret(stored.web?.tavilyApiKey, patch.web?.tavilyApiKey, keyMaterial),
+      exaApiKey: await mergeSecret(stored.web?.exaApiKey, patch.web?.exaApiKey, keyMaterial),
     },
     mcpToken: await mergeSecret(stored.mcpToken, patch.mcpToken, keyMaterial),
   }
@@ -213,30 +245,37 @@ export function toSettingsView(settings: Settings, canStoreSecrets: boolean): Se
       apiKey: viewOf(settings.agent.apiKey),
     },
     web: {
-      provider: settings.web.provider ?? null,
+      searchProvider: settings.web.searchProvider ?? null,
+      fetchProvider: settings.web.fetchProvider ?? null,
       searchEngine: settings.web.searchEngine,
       fetchEngine: settings.web.fetchEngine,
       maxToolCalls: settings.web.maxToolCalls,
       maxResults: settings.web.maxResults,
       tavilyApiKey: viewOf(settings.web.tavilyApiKey),
+      exaApiKey: viewOf(settings.web.exaApiKey),
     },
     mcpToken: viewOf(settings.mcpToken),
     canStoreSecrets,
   }
 }
 
-/** 联网工具配置。provider 未选、或 tavily 缺 key，都返回 undefined（失败关闭）。 */
+/**
+ * 联网工具配置。两个能力都没选供应商时返回 undefined。
+ * 选了供应商但缺对应 key 的能力会在 buildWebCapability 里被跳过（失败关闭），
+ * 所以这里不做 key 校验——那属于「哪些工具真的装得上」的判断，归 webTools.ts。
+ */
 export function toWebToolsConfig(settings: Settings): WebToolsConfig | undefined {
-  const { provider } = settings.web
-  if (!provider) return undefined
-  if (provider === 'tavily' && !settings.web.tavilyApiKey) return undefined
+  const { searchProvider, fetchProvider } = settings.web
+  if (!searchProvider && !fetchProvider) return undefined
   return {
-    provider,
+    searchProvider,
+    fetchProvider,
     searchEngine: settings.web.searchEngine,
     fetchEngine: settings.web.fetchEngine,
     maxToolCalls: settings.web.maxToolCalls,
     maxResults: settings.web.maxResults,
-    apiKey: settings.web.tavilyApiKey,
+    tavilyApiKey: settings.web.tavilyApiKey,
+    exaApiKey: settings.web.exaApiKey,
   }
 }
 

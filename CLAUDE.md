@@ -72,7 +72,11 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 1. **工具 handler 抛错要在适配层被捕获并作为结果返回**（`aiSdk.ts` 里 `execute` 已 try/catch 返回 `{ error }`）。直接把异常抛给 AI SDK 会被当成致命错误、直接中断整段流式对话。
 2. 部署缺失的能力用 `buildTools({ ... })` 裁剪掉，别让模型调用注定失败的工具。
 
-例外：**Agent 联网工具（web_search / web_fetch）不在 registry**，而在 `agent/webTools.ts`——它是内嵌 Agent 的部署级增强（MCP 侧外部 agent 自带联网能力，不需要我们提供）。抽象为 `WebCapability` 两种供给形态：`providerTools`（注入请求体、由 LLM 网关服务端执行，如 OpenRouter server tools，经 `injectProviderTools` 在自定义 fetch 里改写请求体）与 `registryTools`（本地 function tool，如 Tavily 实现）。配置来自数据库设置（`settings.ts::toWebToolsConfig`），新增供应商只在 `buildWebCapability` 加分支。
+例外：**Agent 联网工具（web_search / web_fetch）不在 registry**，而在 `agent/webTools.ts`——它是内嵌 Agent 的部署级增强（MCP 侧外部 agent 自带联网能力，不需要我们提供）。抽象为 `WebCapability` 两种供给形态：`providerTools`（注入请求体、由 LLM 网关服务端执行，如 OpenRouter server tools，经 `injectProviderTools` 在自定义 fetch 里改写请求体）与 `registryTools`（本地 function tool，如 Tavily / Exa 实现）。配置来自数据库设置（`settings.ts::toWebToolsConfig`）。
+
+**搜索与抓取各自选供应商**（`searchProvider` / `fetchProvider`），可以混搭——两者都只是往上面两个数组里塞东西。唯一约束是**同一个能力只能有一个供应商**，否则模型会看到两个同名 `web_search`。新增供应商：写 `xxxSearchTool` / `xxxFetchTool`，再到 `buildWebCapability` 的两个 switch 里各加一行。
+
+⚠️ `providerTools` 有前提：**只有模型经 OpenRouter 转发时才生效**。换成直连 OpenAI 或本地 Ollama，`openrouter:*` 声明会被上游忽略；`registryTools` 是我们自己执行的，与模型供应商无关。设置页对此有提示。
 
 ### 引导配置 vs 运行时设置
 

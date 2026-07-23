@@ -76,8 +76,11 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 | 设置页里的项 | 说明 |
 |---|---|
 | Agent 模型 | Base URL / 模型名 / API Key，任意兼容 OpenAI Chat Completions 的服务（含本地 Ollama、LM Studio）。带「测试连接」可先验证再保存 |
-| 联网工具 | 给 Agent 的 `web_search` / `web_fetch`。可选 OpenRouter 服务端工具（搜索与抓取引擎分别可选）或 Tavily |
-| 远端 MCP 口令 | `/mcp` 的 Bearer token。清空即关闭远端 MCP |
+| 联网工具 | 给 Agent 的 `web_search` / `web_fetch`。**两个能力各自选供应商**（OpenRouter 服务端工具 / Tavily / Exa），可以混搭，也可以只开其中一个 |
+| 远端 MCP 口令 | `/mcp` 的 Bearer token，点「生成」即可。清空即关闭远端 MCP |
+
+> OpenRouter 那套是由网关服务端执行的，**只有当模型 Base URL 指向 OpenRouter 时才生效**；
+> 换成直连 OpenAI 或本地模型请用 Tavily / Exa——那两个由本实例自己调用，与模型供应商无关。
 
 > 安全说明：管理接口默认**失败关闭**——既未设 `ADMIN_TOKEN` 也未设 `SUBFORGE_ALLOW_NO_AUTH=1` 时，`/api/*` 一律返回 503（分享出口 `/sub/:token` 不受影响，仍公开）。远端 MCP 使用独立的口令，不受无鉴权模式影响。密钥在库里是 AES-GCM 密文，解不开（没配 `SETTINGS_KEY`、或换过）一律按未配置处理。抓取订阅 URL 时会做 SSRF 防护，拒绝 `localhost`/内网/`169.254.169.254`(云元数据) 等地址；模型 Base URL 不在此限，以便接本地大模型。
 
