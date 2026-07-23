@@ -178,6 +178,14 @@ export class SqliteStorage implements Storage {
       .run(text)
   }
 
+  async getSettings(): Promise<string | undefined> {
+    const r = this.db.prepare("SELECT v FROM kv WHERE k = 'settings'").get() as { v: string } | undefined
+    return r?.v
+  }
+  async setSettings(json: string): Promise<void> {
+    this.db.prepare("INSERT INTO kv (k,v) VALUES ('settings',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(json)
+  }
+
   async close(): Promise<void> {
     this.db.close()
   }

@@ -17,6 +17,7 @@ import { AgentDock } from './components/AgentDock'
 import { LoadError, PageSkeleton } from './components/AsyncState'
 import { Mcp } from './components/Mcp'
 import { Profiles } from './components/Profiles'
+import { Settings } from './components/Settings'
 import { Subscriptions } from './components/Subscriptions'
 import { IBrand, IMoon, IPlus, ISparkles, ISun } from './icons'
 import { readView, writeView, type View } from './navigation'
@@ -26,6 +27,7 @@ const TABS: { key: View; label: string; title: string; sub: string }[] = [
   { key: 'subs', label: '订阅', title: '订阅', sub: '添加机场订阅或手工节点，SubForge 会抓取并解析。' },
   { key: 'profiles', label: '配置', title: '配置', sub: '把订阅按你的规则转成可用配置，用分享链接分发。' },
   { key: 'mcp', label: 'MCP', title: 'MCP', sub: '管理外部 Agent 的远端连接与工具访问。' },
+  { key: 'settings', label: '设置', title: '设置', sub: '模型、联网工具与远端 MCP 口令，存数据库、改完即时生效。' },
 ]
 
 /** ProfileDetail 通过该事件通知「Agent 改动了当前配置」，抽屉与详情面板解耦。 */
@@ -253,6 +255,8 @@ export function App() {
                   />
                 )}
                 {tab === 'mcp' && <Mcp meta={meta.mcp} />}
+                {/* 设置会改动 Agent / MCP 的可用性，保存后重拉 meta 让顶栏状态灯与 MCP 页同步 */}
+                {tab === 'settings' && <Settings onSaved={loadMeta} />}
               </>
             )}
           </Box>

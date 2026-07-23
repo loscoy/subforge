@@ -2,7 +2,6 @@ import type { D1Database, Fetcher } from '@cloudflare/workers-types'
 import releaseSyncVariant from '@jitl/quickjs-wasmfile-release-sync'
 import { newQuickJSWASMModuleFromVariant, newVariant } from 'quickjs-emscripten-core'
 import { AiSdkAgentRunner } from './agent/aiSdk.js'
-import { parseWebToolsEnv } from './agent/webTools.js'
 import type { ServerConfig } from './config.js'
 import { createApp } from './routes/app.js'
 import { QuickJsRunner } from './sandbox/quickjs.js'
@@ -27,16 +26,8 @@ export interface Env {
   ASSETS?: Fetcher
   ADMIN_TOKEN?: string
   SUBFORGE_ALLOW_NO_AUTH?: string
-  MCP_TOKEN?: string
-  OPENAI_BASE_URL?: string
-  OPENAI_API_KEY?: string
-  OPENAI_MODEL?: string
-  /** Agent 联网工具：openrouter | tavily，未设则不联网 */
-  AGENT_WEB_TOOLS?: string
-  AGENT_WEB_ENGINE?: string
-  AGENT_WEB_MAX_TOOL_CALLS?: string
-  AGENT_WEB_MAX_RESULTS?: string
-  TAVILY_API_KEY?: string
+  /** 加密数据库里密钥字段的主密钥；未设则 Agent 与远端 MCP 失败关闭 */
+  SETTINGS_KEY?: string
 }
 
 // 模块作用域：同一 isolate 内跨请求复用，QuickJS WASM 模块只实例化一次（首个请求后显著变快）。
@@ -47,31 +38,21 @@ export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const storage = new D1Storage(env.DB)
 
-    const agent =
-      env.OPENAI_BASE_URL && env.OPENAI_API_KEY && env.OPENAI_MODEL
-        ? {
-            baseURL: env.OPENAI_BASE_URL,
-            apiKey: env.OPENAI_API_KEY,
-            model: env.OPENAI_MODEL,
-            webTools: parseWebToolsEnv(env as unknown as Record<string, string | undefined>),
-          }
-        : undefined
-
     const config: ServerConfig = {
       port: 0,
       dbPath: '',
       adminToken: env.ADMIN_TOKEN || undefined,
       allowNoAuth: env.SUBFORGE_ALLOW_NO_AUTH === '1',
-      mcpToken: env.MCP_TOKEN || undefined,
-      agent,
+      settingsKey: env.SETTINGS_KEY || undefined,
     }
 
     const app = createApp({
       storage,
       runner,
       config,
-      // 边缘无测活能力
-      makeAgent: agent ? () => new AiSdkAgentRunner({ storage, runner }, agent) : undefined,
+      // 边缘无测活能力；模型配置来自数据库设置，按请求传入
+      makeAgent: (model) => new AiSdkAgentRunner({ storage, runner }, model),
+      runtimeInfo: { runtime: 'workers', storage: 'd1', sandbox: 'quickjs' },
     })
 
     return app.fetch(request as unknown as Request)

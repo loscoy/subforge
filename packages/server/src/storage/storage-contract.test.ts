@@ -110,6 +110,19 @@ function runContract(name: string, make: () => Storage) {
       await s.setWorkingMemory('偏好香港分组+US')
       expect(await s.getWorkingMemory()).toBe('偏好香港分组+US')
     })
+
+    it('运行时设置：未写入时为 undefined，写入可覆盖', async () => {
+      const s = make()
+      // 与工作记忆区分：空设置是 undefined 而非 ''，settings.ts 据此走默认值
+      expect(await s.getSettings()).toBeUndefined()
+      await s.setSettings('{"agent":{"model":"a"}}')
+      expect(await s.getSettings()).toBe('{"agent":{"model":"a"}}')
+      await s.setSettings('{"agent":{"model":"b"}}')
+      expect(await s.getSettings()).toBe('{"agent":{"model":"b"}}')
+      // 与工作记忆共用 kv 表但互不干扰
+      await s.setWorkingMemory('mem')
+      expect(await s.getSettings()).toBe('{"agent":{"model":"b"}}')
+    })
   })
 }
 

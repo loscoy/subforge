@@ -90,3 +90,62 @@ export interface Meta {
     tools: { name: string; description: string }[]
   }
 }
+
+// ---------- 运行时设置 ----------
+
+export const WEB_PROVIDERS = ['openrouter', 'tavily'] as const
+export type WebProvider = (typeof WEB_PROVIDERS)[number]
+export const SEARCH_ENGINES = ['auto', 'native', 'exa', 'firecrawl', 'parallel', 'perplexity'] as const
+/** perplexity 只做搜索，不适用于抓取 */
+export const FETCH_ENGINES = ['auto', 'native', 'exa', 'firecrawl', 'parallel'] as const
+
+/** 密钥字段：服务端只回「配没配 + 掩码」，永不回明文 */
+export interface SecretView {
+  configured: boolean
+  hint?: string
+}
+
+export interface Settings {
+  agent: { baseURL: string; model: string; apiKey: SecretView }
+  web: {
+    provider: WebProvider | null
+    searchEngine: string
+    fetchEngine: string
+    maxToolCalls: number
+    maxResults: number
+    tavilyApiKey: SecretView
+  }
+  mcpToken: SecretView
+  /** false 表示部署没设 SETTINGS_KEY，密钥存不进去 */
+  canStoreSecrets: boolean
+  diagnostics: {
+    runtime: string
+    storage: string
+    sandbox: string
+    renderers: string[]
+    healthcheck: boolean
+  }
+}
+
+/** 密钥字段三态：不传=不变，字符串=设为新值，null=清除 */
+export type SecretPatch = string | null | undefined
+
+export interface SettingsPatch {
+  agent?: { baseURL?: string; model?: string; apiKey?: SecretPatch }
+  web?: {
+    provider?: WebProvider | null
+    searchEngine?: string
+    fetchEngine?: string
+    maxToolCalls?: number
+    maxResults?: number
+    tavilyApiKey?: SecretPatch
+  }
+  mcpToken?: SecretPatch
+}
+
+export interface ProbeResult {
+  ok: boolean
+  status?: number
+  latencyMs: number
+  error?: string
+}

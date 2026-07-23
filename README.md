@@ -41,7 +41,7 @@
 ### Docker（推荐）
 
 ```bash
-cp .env.example .env   # 按需填 ADMIN_TOKEN / MCP_TOKEN / OPENAI_*
+cp .env.example .env   # 填 ADMIN_TOKEN 与 SETTINGS_KEY；模型/MCP 口令进去后在「设置」页配
 docker compose up -d
 # 打开 http://localhost:8787
 ```
@@ -68,10 +68,18 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 | `DB_PATH` | sqlite 路径（默认 `./data/subforge.sqlite`） |
 | `ADMIN_TOKEN` | 管理接口口令（Bearer / `X-Admin-Token`）。**强烈建议设置**：未设时管理接口默认锁定（返回 503） |
 | `SUBFORGE_ALLOW_NO_AUTH` | 设为 `1` 时，允许在未设 `ADMIN_TOKEN` 的情况下无鉴权提供管理接口（仅限本地自用，切勿暴露公网） |
-| `MCP_TOKEN` | 远端 MCP 的 Bearer token。未设时 `/mcp` 默认锁定（返回 503） |
-| `OPENAI_BASE_URL` / `OPENAI_API_KEY` / `OPENAI_MODEL` | Agent 用的兼容 OpenAI 接口；不填则 Agent 禁用 |
+| `SETTINGS_KEY` | 加密数据库里密钥字段（模型 API Key、MCP 口令）的主密钥。未设时密钥存不进去，Agent 与远端 MCP 保持关闭 |
 
-> 安全说明：管理接口默认**失败关闭**——既未设 `ADMIN_TOKEN` 也未设 `SUBFORGE_ALLOW_NO_AUTH=1` 时，`/api/*` 一律返回 503（分享出口 `/sub/:token` 不受影响，仍公开）。远端 MCP 使用独立的 `MCP_TOKEN`，不受无鉴权模式影响。抓取订阅 URL 时会做 SSRF 防护，拒绝 `localhost`/内网/`169.254.169.254`(云元数据) 等地址。
+环境变量只管**引导配置**。模型、联网工具、远端 MCP 口令属于**运行时设置**，存在数据库里、
+在 Web「设置」页维护，改完即时生效不用重启。旧版的 `OPENAI_*` / `MCP_TOKEN` / `AGENT_WEB_*` 已废弃。
+
+| 设置页里的项 | 说明 |
+|---|---|
+| Agent 模型 | Base URL / 模型名 / API Key，任意兼容 OpenAI Chat Completions 的服务（含本地 Ollama、LM Studio）。带「测试连接」可先验证再保存 |
+| 联网工具 | 给 Agent 的 `web_search` / `web_fetch`。可选 OpenRouter 服务端工具（搜索与抓取引擎分别可选）或 Tavily |
+| 远端 MCP 口令 | `/mcp` 的 Bearer token。清空即关闭远端 MCP |
+
+> 安全说明：管理接口默认**失败关闭**——既未设 `ADMIN_TOKEN` 也未设 `SUBFORGE_ALLOW_NO_AUTH=1` 时，`/api/*` 一律返回 503（分享出口 `/sub/:token` 不受影响，仍公开）。远端 MCP 使用独立的口令，不受无鉴权模式影响。密钥在库里是 AES-GCM 密文，解不开（没配 `SETTINGS_KEY`、或换过）一律按未配置处理。抓取订阅 URL 时会做 SSRF 防护，拒绝 `localhost`/内网/`169.254.169.254`(云元数据) 等地址；模型 Base URL 不在此限，以便接本地大模型。
 
 ## 用 Claude Code / Codex 驱动（MCP）
 
@@ -79,7 +87,7 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 
 ### 远端 Streamable HTTP
 
-设置 `MCP_TOKEN` 并重启服务后，端点为 `https://你的域名/mcp`。Claude Code 可这样连接：
+在 Web「设置」页填好 MCP 口令后（即时生效，无需重启），端点为 `https://你的域名/mcp`。Claude Code 可这样连接：
 
 ```bash
 claude mcp add --transport http subforge "https://subforge.example.com/mcp" \
@@ -122,7 +130,7 @@ bearer_token_env_var = "SUBFORGE_MCP_TOKEN"
 
 ### 本地 stdio
 
-stdio 模式直接访问同一个 sqlite 文件，不需要 `MCP_TOKEN`：
+stdio 模式直接访问同一个 sqlite 文件，不需要 MCP 口令：
 
 ```json
 {

@@ -1,6 +1,10 @@
-import type { AgentModelConfig } from './agent/index.js'
-import { parseWebToolsEnv } from './agent/webTools.js'
-
+/**
+ * 引导配置：只管「怎么把服务跑起来」，全部来自环境变量，启动后不变。
+ *
+ * 「服务跑起来之后干什么」——用哪个模型、联不联网、远端 MCP 开不开——
+ * 属于运行时设置，存数据库、由 Web 设置页维护，见 settings.ts。
+ * 那部分不再读环境变量（OPENAI_* / MCP_TOKEN / AGENT_WEB_* 已废弃）。
+ */
 export interface ServerConfig {
   port: number
   dbPath: string
@@ -8,31 +12,20 @@ export interface ServerConfig {
   adminToken?: string
   /** 未设 adminToken 时是否允许无鉴权提供管理接口。默认 false（失败关闭），需显式开启。 */
   allowNoAuth?: boolean
-  /** 远端 MCP 的 Bearer token。未配置时远端 MCP 失败关闭。 */
-  mcpToken?: string
+  /** 加密数据库里密钥字段的主密钥。未设则密钥无法存取，Agent 与远端 MCP 失败关闭。 */
+  settingsKey?: string
   /** 前端静态资源目录（生产环境由后端托管） */
   webDir?: string
-  agent?: AgentModelConfig
 }
 
 export function getConfig(): ServerConfig {
   const env = process.env
-  const agent: AgentModelConfig | undefined =
-    env.OPENAI_BASE_URL && env.OPENAI_API_KEY && env.OPENAI_MODEL
-      ? {
-          baseURL: env.OPENAI_BASE_URL,
-          apiKey: env.OPENAI_API_KEY,
-          model: env.OPENAI_MODEL,
-          webTools: parseWebToolsEnv(env),
-        }
-      : undefined
   return {
     port: Number(env.PORT ?? 8787),
     dbPath: env.DB_PATH ?? './data/subforge.sqlite',
     adminToken: env.ADMIN_TOKEN || undefined,
     allowNoAuth: env.SUBFORGE_ALLOW_NO_AUTH === '1',
-    mcpToken: env.MCP_TOKEN || undefined,
+    settingsKey: env.SETTINGS_KEY || undefined,
     webDir: env.WEB_DIR || undefined,
-    agent,
   }
 }
