@@ -161,7 +161,9 @@ export function App() {
   const agentProfile = tab === 'profiles' ? profileCtx : null
 
   return (
-    <Box style={{ minHeight: '100dvh', display: 'flex', flexDirection: 'column' }}>
+    // 最小高度用 svh（小视口）而非 dvh：手机浏览器工具栏收起时 dvh 动态变大，
+    // 会把不足一屏的页面撑出一段「能下滑的空白」。
+    <Box style={{ minHeight: '100svh', display: 'flex', flexDirection: 'column' }}>
       {/* 顶栏导航 */}
       <Box component="header" className="topbar">
         <Box className="topbar-brand">
