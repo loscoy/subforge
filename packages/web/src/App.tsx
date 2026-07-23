@@ -235,7 +235,7 @@ export function App() {
             )}
           </Group>
 
-          <Box className="page-body" style={{ flex: 1 }}>
+          <Box className="page-body">
             {metaStatus === 'loading' && <PageSkeleton />}
             {metaStatus === 'error' && <LoadError message={metaError || '无法读取实例信息。'} onRetry={loadMeta} />}
             {metaStatus === 'success' && meta && (

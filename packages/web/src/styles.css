@@ -145,6 +145,9 @@ body {
   position: sticky;
   bottom: 0;
   z-index: 30;
+  /* 内容不足一屏时把保存栏推到视口底部；主列不再用 flex:1 撑满，
+     避免「视口高度 + 保存栏高度」造成页面底部多出可滚动的空白 */
+  margin-top: auto;
 }
 .save-bar {
   display: flex;
@@ -459,6 +462,12 @@ body {
     border-right: none;
     border-bottom: 1px solid var(--sf-border-subtle);
   }
+  /* 单列布局下没有「左栏高度」可对齐，工具列表直接展开、随页面滚动 */
+  .mcp-tools-scroll {
+    flex: none;
+    height: auto;
+    overflow-y: visible;
+  }
 }
 @media (max-width: 48em) {
   .mantine-ActionIcon-root {
@@ -591,9 +600,10 @@ body {
   margin: 0.25em 0;
   border: 0;
 }
+/* 表格用描边而非斑马纹：气泡底色（subtle）与斑马纹用色重合会让格子「隐形」，
+   描边在任意底色（浅/暗、surface/subtle）上都可读。 */
 .md table {
-  border-collapse: separate;
-  border-spacing: 0 3px;
+  border-collapse: collapse;
   margin: 0.6em 0;
   font-size: 12.5px;
   display: block;
@@ -603,24 +613,13 @@ body {
 .md td {
   padding: 5px 10px;
   text-align: left;
+  border: 1px solid var(--sf-border-interactive);
+  background: var(--sf-surface);
 }
 .md th {
-  background: var(--sf-surface);
   font-weight: 600;
   white-space: nowrap;
 }
-.md tbody tr:nth-child(odd) td {
-  background: var(--sf-surface);
-}
-.md tr > :first-child {
-  border-radius: 6px 0 0 6px;
-}
-.md tr > :last-child {
-  border-radius: 0 6px 6px 0;
-}
 [data-mantine-color-scheme='dark'] .md code {
   background: var(--mantine-color-dark-5);
-}
-[data-mantine-color-scheme='dark'] .md th {
-  background: var(--sf-surface);
 }
