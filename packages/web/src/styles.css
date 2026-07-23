@@ -550,6 +550,38 @@ body {
 .settings-card-head {
   border-bottom: 1px solid var(--sf-border-subtle);
 }
+/* 卡片内部的分区小卡：搜索 / 抓取 各占一张，配置项不再混成一坨 */
+.settings-subcard {
+  padding: 14px;
+  border: 1px solid var(--sf-border-subtle);
+  border-radius: 10px;
+  background: var(--sf-surface-subtle);
+}
+.settings-subcard-icon {
+  width: 26px;
+  height: 26px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  border-radius: 7px;
+  color: var(--mantine-color-violet-6);
+  background: var(--sf-surface);
+}
+/* 两张小卡等高，一边多出「搜索引擎」时不会长短不齐 */
+.settings-web-split {
+  align-items: stretch;
+}
+/* 已配置的密钥：输入框铺满圆点，一眼看出「配过」，而不是一行灰 placeholder。
+   明文只在后端，前端本来就拿不到，圆点纯属视觉占位。 */
+.secret-input-masked input::placeholder {
+  color: var(--mantine-color-text);
+  opacity: 0.6;
+  letter-spacing: 0.16em;
+}
+/* Edge 会给 type=password 塞一个自带的「显示密码」眼睛，去掉 */
+.secret-input input::-ms-reveal {
+  display: none;
+}
 /* 工具列表随左栏高度滚动，不把卡片撑高 */
 .mcp-tools {
   display: flex;

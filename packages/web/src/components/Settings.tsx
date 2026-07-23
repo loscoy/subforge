@@ -8,7 +8,6 @@ import {
   Group,
   NativeSelect,
   NumberInput,
-  PasswordInput,
   Stack,
   Text,
   TextInput,
@@ -16,7 +15,7 @@ import {
 import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
 import { api } from '../api'
-import { IAlert, ICheck, IKey, IPlug, IPulse, ISparkles } from '../icons'
+import { IAlert, ICheck, IGlobe, IKey, IPlug, IPulse, ISearch, ISparkles } from '../icons'
 import {
   FETCH_ENGINES,
   SEARCH_ENGINES,
@@ -29,9 +28,15 @@ import {
 } from '../types'
 import { LoadError, PageSkeleton } from './AsyncState'
 
+/** 已配置时铺进输入框的圆点：纯视觉提示，明文在后端，前端拿不到也不需要 */
+const MASK_DOTS = '•'.repeat(14)
+
 /**
  * 密钥输入：服务端只回「配没配 + 掩码」，明文永远不出后端。
  * 三态由 draft 表达——undefined 不改、'' 经「清除」变成 null、有值即覆盖。
+ *
+ * 「已配置」不靠灰色 placeholder 传达（那和空字段太像），而是让输入框看起来
+ * 真的填了东西：圆点铺满 + 下方一枚带掩码的状态徽标。
  */
 function SecretInput({
   label,
@@ -52,19 +57,19 @@ function SecretInput({
   extraActions?: React.ReactNode
 }) {
   const cleared = draft === null
-  const placeholder = cleared
-    ? '（保存后清除）'
-    : view.configured
-      ? `已配置 ${view.hint ?? ''}，留空即不改`
-      : '尚未配置'
+  const typing = typeof draft === 'string'
+  // 已配置 + 本次没动过：铺圆点。一旦开始输入或点了清除就换回常规 placeholder
+  const masked = view.configured && !cleared && !typing
   return (
     <Box>
-      <PasswordInput
+      <TextInput
+        type="password"
+        className={masked ? 'secret-input secret-input-masked' : 'secret-input'}
         label={label}
         description={description}
-        placeholder={placeholder}
+        placeholder={cleared ? '（保存后清除）' : masked ? MASK_DOTS : '尚未配置'}
         disabled={disabled}
-        value={typeof draft === 'string' ? draft : ''}
+        value={typing ? draft : ''}
         onChange={(e) => onChange(e.currentTarget.value || undefined)}
       />
       {!disabled && (
@@ -78,8 +83,34 @@ function SecretInput({
                 撤销
               </Button>
             </>
+          ) : typing ? (
+            <>
+              <Badge variant="light" color="violet" size="sm" tt="none" fw={500}>
+                {view.configured ? '保存后替换为新值' : '保存后生效'}
+              </Badge>
+              <Button variant="subtle" size="compact-xs" onClick={() => onChange(undefined)}>
+                撤销
+              </Button>
+              {extraActions}
+            </>
           ) : (
             <>
+              {view.configured ? (
+                <Badge
+                  variant="light"
+                  color="teal"
+                  size="sm"
+                  tt="none"
+                  fw={500}
+                  leftSection={<ICheck size={11} />}
+                >
+                  已配置{view.hint ? ` · ${view.hint}` : ''}
+                </Badge>
+              ) : (
+                <Badge variant="light" color="gray" size="sm" tt="none" fw={500}>
+                  未配置
+                </Badge>
+              )}
               {extraActions}
               {view.configured && (
                 <Button variant="subtle" color="red" size="compact-xs" onClick={() => onChange(null)}>
@@ -144,12 +175,84 @@ function SectionCard({
   )
 }
 
+/** 卡片内部的分区小卡：搜索与抓取各占一张，配置项不再混在一起 */
+function SubCard({
+  icon,
+  title,
+  sub,
+  badge,
+  children,
+}: {
+  icon: React.ReactNode
+  title: string
+  sub: string
+  badge: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <Box className="settings-subcard">
+      <Group gap={9} wrap="nowrap" align="flex-start" mb={12}>
+        <Box className="settings-subcard-icon">{icon}</Box>
+        <Box style={{ flex: 1, minWidth: 0 }}>
+          <Group gap={8} wrap="nowrap" justify="space-between">
+            <Text fw={600} fz={13.5}>
+              {title}
+            </Text>
+            {badge}
+          </Group>
+          <Text fz={12} c="dimmed">
+            {sub}
+          </Text>
+        </Box>
+      </Group>
+      <Stack gap={12}>{children}</Stack>
+    </Box>
+  )
+}
+
+/** 小卡内共享的次级分区标题（供应商密钥 / 通用限制） */
+function FieldGroup({ title, sub, children }: { title: string; sub: string; children: React.ReactNode }) {
+  return (
+    <Box>
+      <Text fw={600} fz={13}>
+        {title}
+      </Text>
+      <Text fz={12} c="dimmed" mb={12}>
+        {sub}
+      </Text>
+      <Stack gap={14}>{children}</Stack>
+    </Box>
+  )
+}
+
 const PROVIDER_OPTIONS = [
   { value: '', label: '关闭' },
   { value: 'openrouter', label: 'OpenRouter 服务端工具' },
   { value: 'tavily', label: 'Tavily' },
   { value: 'exa', label: 'Exa' },
 ]
+
+/** 小卡右上角徽标用的短名，下拉里的长标签放不下 */
+const PROVIDER_SHORT: Record<WebProvider, string> = {
+  openrouter: 'OpenRouter',
+  tavily: 'Tavily',
+  exa: 'Exa',
+}
+
+function ProviderBadge({ provider }: { provider: WebProvider | null }) {
+  return (
+    <Badge
+      variant="light"
+      color={provider ? 'teal' : 'gray'}
+      size="sm"
+      tt="none"
+      fw={500}
+      style={{ flexShrink: 0 }}
+    >
+      {provider ? PROVIDER_SHORT[provider] : '未启用'}
+    </Badge>
+  )
+}
 
 export function Settings({ onSaved }: { onSaved?: () => void }) {
   const [data, setData] = useState<SettingsDto | null>(null)
@@ -279,89 +382,121 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
         </Group>
       </SectionCard>
 
-      <SectionCard icon={<IPlug size={17} />} title="联网工具" sub="搜索与抓取分别选供应商，可以混搭">
-        <Box className="form-grid form-grid-2">
-          <NativeSelect
-            label="搜索（web_search）"
-            data={PROVIDER_OPTIONS}
-            value={searchProvider ?? ''}
-            onChange={(e) => patchWeb({ searchProvider: (e.currentTarget.value || null) as WebProvider | null })}
-          />
-          <NativeSelect
-            label="抓取（web_fetch）"
-            data={PROVIDER_OPTIONS}
-            value={fetchProvider ?? ''}
-            onChange={(e) => patchWeb({ fetchProvider: (e.currentTarget.value || null) as WebProvider | null })}
-          />
+      <SectionCard icon={<IPlug size={17} />} title="联网工具" sub="搜索与抓取各自独立配置，可以混搭不同供应商">
+        <Box className="form-grid form-grid-2 settings-web-split">
+          <SubCard
+            icon={<ISearch size={15} />}
+            title="搜索"
+            sub="web_search · 让 Agent 查资料"
+            badge={<ProviderBadge provider={searchProvider} />}
+          >
+            <NativeSelect
+              label="供应商"
+              data={PROVIDER_OPTIONS}
+              value={searchProvider ?? ''}
+              onChange={(e) => patchWeb({ searchProvider: (e.currentTarget.value || null) as WebProvider | null })}
+            />
+            {searchProvider === 'openrouter' && (
+              <NativeSelect
+                label="搜索引擎"
+                description="auto 交给 OpenRouter 自选"
+                data={[...SEARCH_ENGINES]}
+                value={webField('searchEngine')}
+                onChange={(e) => patchWeb({ searchEngine: e.currentTarget.value })}
+              />
+            )}
+            {(searchProvider === 'tavily' || searchProvider === 'exa') && (
+              <Text fz={12} c="dimmed">
+                API Key 在下方「供应商密钥」里填。
+              </Text>
+            )}
+          </SubCard>
+
+          <SubCard
+            icon={<IGlobe size={15} />}
+            title="抓取"
+            sub="web_fetch · 让 Agent 读网页"
+            badge={<ProviderBadge provider={fetchProvider} />}
+          >
+            <NativeSelect
+              label="供应商"
+              data={PROVIDER_OPTIONS}
+              value={fetchProvider ?? ''}
+              onChange={(e) => patchWeb({ fetchProvider: (e.currentTarget.value || null) as WebProvider | null })}
+            />
+            {fetchProvider === 'openrouter' && (
+              <NativeSelect
+                label="抓取引擎"
+                description="不含 perplexity，它只做搜索"
+                data={[...FETCH_ENGINES]}
+                value={webField('fetchEngine')}
+                onChange={(e) => patchWeb({ fetchEngine: e.currentTarget.value })}
+              />
+            )}
+            {(fetchProvider === 'tavily' || fetchProvider === 'exa') && (
+              <Text fz={12} c="dimmed">
+                API Key 在下方「供应商密钥」里填。
+              </Text>
+            )}
+          </SubCard>
         </Box>
 
         {usesProvider('openrouter') && (
           <Alert color="gray" variant="light">
-            OpenRouter 的工具由网关服务端执行，**只有当上面的模型 Base URL 指向 OpenRouter 时才生效**。
-            换成直连 OpenAI 或本地模型的话，请改用 Tavily / Exa（那两个由本实例自己调用，与模型供应商无关）。
+            OpenRouter 的工具由网关服务端执行，
+            <Text span fw={600} inherit>
+              只有当上面的模型 Base URL 指向 OpenRouter 时才生效
+            </Text>
+            。换成直连 OpenAI 或本地模型的话，请改用 Tavily / Exa（那两个由本实例自己调用，与模型供应商无关）。
           </Alert>
         )}
 
-        <Box className="form-grid form-grid-2">
-          {searchProvider === 'openrouter' && (
-            <NativeSelect
-              label="搜索引擎"
-              description="auto 交给 OpenRouter 自选"
-              data={[...SEARCH_ENGINES]}
-              value={webField('searchEngine')}
-              onChange={(e) => patchWeb({ searchEngine: e.currentTarget.value })}
-            />
-          )}
-          {fetchProvider === 'openrouter' && (
-            <NativeSelect
-              label="抓取引擎"
-              description="不含 perplexity，它只做搜索"
-              data={[...FETCH_ENGINES]}
-              value={webField('fetchEngine')}
-              onChange={(e) => patchWeb({ fetchEngine: e.currentTarget.value })}
-            />
-          )}
-        </Box>
-
-        {usesProvider('tavily') && (
-          <SecretInput
-            label="Tavily API Key"
-            description="缺 key 时用到 Tavily 的那个能力不会注册"
-            view={data.web.tavilyApiKey}
-            draft={patch.web?.tavilyApiKey}
-            disabled={lockSecrets}
-            onChange={(tavilyApiKey) => patchWeb({ tavilyApiKey })}
-          />
-        )}
-        {usesProvider('exa') && (
-          <SecretInput
-            label="Exa API Key"
-            description="缺 key 时用到 Exa 的那个能力不会注册"
-            view={data.web.exaApiKey}
-            draft={patch.web?.exaApiKey}
-            disabled={lockSecrets}
-            onChange={(exaApiKey) => patchWeb({ exaApiKey })}
-          />
+        {(usesProvider('tavily') || usesProvider('exa')) && (
+          <FieldGroup title="供应商密钥" sub="搜索与抓取选到同一家时共用一把 key，填一次即可">
+            {usesProvider('tavily') && (
+              <SecretInput
+                label="Tavily API Key"
+                description="缺 key 时用到 Tavily 的那个能力不会注册"
+                view={data.web.tavilyApiKey}
+                draft={patch.web?.tavilyApiKey}
+                disabled={lockSecrets}
+                onChange={(tavilyApiKey) => patchWeb({ tavilyApiKey })}
+              />
+            )}
+            {usesProvider('exa') && (
+              <SecretInput
+                label="Exa API Key"
+                description="缺 key 时用到 Exa 的那个能力不会注册"
+                view={data.web.exaApiKey}
+                draft={patch.web?.exaApiKey}
+                disabled={lockSecrets}
+                onChange={(exaApiKey) => patchWeb({ exaApiKey })}
+              />
+            )}
+          </FieldGroup>
         )}
 
         {anyWebEnabled && (
-          <Box className="form-grid form-grid-2">
-            <NumberInput
-              label="单轮调用上限"
-              description="防止一轮对话烧掉几十次搜索"
-              min={1}
-              max={25}
-              value={webField('maxToolCalls')}
-              onChange={(v) => patchWeb({ maxToolCalls: typeof v === 'number' ? v : undefined })}
-            />
-            <NumberInput
-              label="单次结果条数"
-              min={1}
-              max={25}
-              value={webField('maxResults')}
-              onChange={(v) => patchWeb({ maxResults: typeof v === 'number' ? v : undefined })}
-            />
-          </Box>
+          <FieldGroup title="通用限制" sub="对搜索与抓取同时生效">
+            <Box className="form-grid form-grid-2">
+              <NumberInput
+                label="单轮调用上限"
+                description="防止一轮对话烧掉几十次搜索"
+                min={1}
+                max={25}
+                value={webField('maxToolCalls')}
+                onChange={(v) => patchWeb({ maxToolCalls: typeof v === 'number' ? v : undefined })}
+              />
+              <NumberInput
+                label="单次结果条数"
+                description="一次调用最多返回几条"
+                min={1}
+                max={25}
+                value={webField('maxResults')}
+                onChange={(v) => patchWeb({ maxResults: typeof v === 'number' ? v : undefined })}
+              />
+            </Box>
+          </FieldGroup>
         )}
       </SectionCard>
 
