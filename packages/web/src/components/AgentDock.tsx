@@ -10,6 +10,8 @@ const AGENT_DEFAULT_WIDTH = 380
 /** 键盘调整步长：普通 16px，按住 Shift 时 64px */
 const STEP = 16
 const STEP_LARGE = 64
+/** 与 styles.css 里手机全屏那条断点保持一致（48em = 768px） */
+const FULLSCREEN_QUERY = '(max-width: 48em)'
 
 /** 面板不能宽过视口的 72%，否则主内容区没法用了 */
 function upperBound(viewport: number) {
@@ -45,10 +47,19 @@ export function AgentDock({
   onClose: () => void
   onChanged: () => void
 }) {
-  const [width, setWidth] = useState(() => clampAgentWidth(readStoredWidth(), window.innerWidth))
+  // width 存的是「用户想要的宽度」，渲染时才按当前视口收窄。
+  // 若直接把收窄结果写回 state，窗口变窄一次就再也回不去了。
+  const [width, setWidth] = useState(readStoredWidth)
+  const [viewport, setViewport] = useState(() => window.innerWidth)
   const [maximized, setMaximized] = useState(false)
   const [resizing, setResizing] = useState(false)
+  // 手机上面板本身就是全屏（CSS 负责），这里只是让 JS 侧知道，
+  // 以便同样按「模态」对待：焦点陷阱、aria-modal、锁背景滚动。
+  const [fullscreen, setFullscreen] = useState(() => window.matchMedia(FULLSCREEN_QUERY).matches)
   const handleRef = useRef<HTMLDivElement>(null)
+  // 全屏与放大是同一件事的两种触发方式，对外统一按模态处理
+  const asDialog = maximized || fullscreen
+  const effectiveWidth = clampAgentWidth(width, viewport)
 
   const commitWidth = useCallback((next: number) => {
     const clamped = clampAgentWidth(next, window.innerWidth)
@@ -60,25 +71,37 @@ export function AgentDock({
     }
   }, [])
 
-  // 视口变窄时同步收窄，避免面板把主内容挤没
+  // 视口宽度与全屏断点一起同步。除了 matchMedia 的 change，也挂 resize：
+  // 某些环境（含无头 / 设备模拟）改视口不一定派发 change，只靠它会漏。
+  // 进入手机尺寸时清掉「放大」，避免两套弹窗样式打架。
   useEffect(() => {
-    const onResize = () => setWidth((w) => clampAgentWidth(w, window.innerWidth))
-    window.addEventListener('resize', onResize)
-    return () => window.removeEventListener('resize', onResize)
+    const mq = window.matchMedia(FULLSCREEN_QUERY)
+    const sync = () => {
+      setViewport(window.innerWidth)
+      setFullscreen(mq.matches)
+      if (mq.matches) setMaximized(false)
+    }
+    sync()
+    window.addEventListener('resize', sync)
+    mq.addEventListener('change', sync)
+    return () => {
+      window.removeEventListener('resize', sync)
+      mq.removeEventListener('change', sync)
+    }
   }, [])
 
-  // 弹窗形态下 Esc 还原为停靠栏（对话本身不关闭）
+  // Esc：放大态还原为停靠栏；手机全屏态直接关闭（没有可还原的中间形态）
   useEffect(() => {
-    if (!maximized) return
+    if (!asDialog) return
     const onKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') {
-        e.stopPropagation()
-        setMaximized(false)
-      }
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      if (maximized) setMaximized(false)
+      else onClose()
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [maximized])
+  }, [asDialog, maximized, onClose])
 
   // 拖拽期间锁住全局选中态与光标，防止选到页面文字
   useEffect(() => {
@@ -87,9 +110,9 @@ export function AgentDock({
     return () => document.documentElement.removeAttribute('data-sf-resizing')
   }, [resizing])
 
-  // 弹窗形态锁住背景滚动；补上滚动条宽度，避免锁的瞬间整页横向抖一下
+  // 模态形态（放大 / 手机全屏）锁住背景滚动；补上滚动条宽度，避免锁的瞬间整页横向抖一下
   useEffect(() => {
-    if (!maximized) return
+    if (!asDialog) return
     const root = document.documentElement
     const gap = window.innerWidth - root.clientWidth
     const prevOverflow = root.style.overflow
@@ -100,15 +123,15 @@ export function AgentDock({
       root.style.overflow = prevOverflow
       root.style.paddingRight = prevPadding
     }
-  }, [maximized])
+  }, [asDialog])
 
   const onHandleKeyDown = (e: React.KeyboardEvent) => {
     const step = e.shiftKey ? STEP_LARGE : STEP
-    // 面板停靠在右侧：向左拖 = 变宽
-    if (e.key === 'ArrowLeft') commitWidth(width + step)
-    else if (e.key === 'ArrowRight') commitWidth(width - step)
+    // 以当前实际宽度为基准增减，面板停靠在右侧：向左 = 变宽
+    if (e.key === 'ArrowLeft') commitWidth(effectiveWidth + step)
+    else if (e.key === 'ArrowRight') commitWidth(effectiveWidth - step)
     else if (e.key === 'Home') commitWidth(AGENT_MIN_WIDTH)
-    else if (e.key === 'End') commitWidth(upperBound(window.innerWidth))
+    else if (e.key === 'End') commitWidth(upperBound(viewport))
     else return
     e.preventDefault()
   }
@@ -120,27 +143,27 @@ export function AgentDock({
       {maximized && (
         <Box className="agent-scrim" onClick={() => setMaximized(false)} aria-hidden="true" />
       )}
-      <FocusTrap active={maximized}>
+      <FocusTrap active={asDialog}>
         <Box
           component="aside"
           className="agent-drawer"
           data-maximized={maximized || undefined}
           data-resizing={resizing || undefined}
-          style={{ '--sf-agent-width': `${width}px` } as React.CSSProperties}
-          role={maximized ? 'dialog' : undefined}
-          aria-modal={maximized || undefined}
+          style={{ '--sf-agent-width': `${effectiveWidth}px` } as React.CSSProperties}
+          role={asDialog ? 'dialog' : undefined}
+          aria-modal={asDialog || undefined}
           aria-label="Agent 对话"
         >
-          {!maximized && (
+          {!asDialog && (
             <div
               ref={handleRef}
               className="agent-resizer"
               role="separator"
               aria-orientation="vertical"
               aria-label="调整 Agent 面板宽度"
-              aria-valuenow={width}
+              aria-valuenow={effectiveWidth}
               aria-valuemin={AGENT_MIN_WIDTH}
-              aria-valuemax={upperBound(window.innerWidth)}
+              aria-valuemax={upperBound(viewport)}
               tabIndex={0}
               onKeyDown={onHandleKeyDown}
               onDoubleClick={() => commitWidth(AGENT_DEFAULT_WIDTH)}

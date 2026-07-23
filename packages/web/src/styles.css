@@ -229,6 +229,12 @@ body {
     transform: scale(0.985);
   }
 }
+@keyframes sf-sheet-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+}
 
 /* ---------- 吸底保存栏 ---------- */
 .save-slot {
@@ -511,6 +517,8 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* 滚到顶/底时不把滚动传给背后的页面（手机全屏态尤其明显） */
+  overscroll-behavior: contain;
   padding: 6px 2px;
   display: flex;
   flex-direction: column;
@@ -595,6 +603,7 @@ body {
     animation: none;
   }
   .agent-scrim,
+  .agent-drawer,
   .agent-drawer[data-maximized] {
     animation: none;
   }
@@ -678,16 +687,25 @@ body {
     padding: 10px 16px;
     row-gap: 8px;
   }
-  .agent-drawer {
+  /* 手机上作为全屏面板：连顶栏一起盖住，不再受拖拽宽度控制。
+     用 inset:0 而不是 100dvh —— fixed 元素跟随可视视口，
+     浏览器工具栏收放时不会像 dvh 那样跟着抖一下。
+     同时覆盖 [data-maximized]，避免从桌面放大态旋转/缩窗过来时残留居中弹窗样式。 */
+  .agent-drawer,
+  .agent-drawer[data-maximized] {
     position: fixed;
-    right: 0;
-    top: 54px;
-    /* 手机上占满全宽，平板保持抽屉宽度；此时不再受拖拽宽度控制 */
-    width: min(400px, 100dvw);
-    z-index: 50;
-    box-shadow: var(--mantine-shadow-md);
+    inset: 0;
+    width: auto;
+    height: auto;
+    max-width: none;
+    margin-inline: 0;
+    z-index: 60;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    animation: sf-sheet-in 200ms ease-out;
   }
-  /* 手机上抽屉本就近似全屏，拖宽 / 放大都没有意义，一并隐藏 */
+  /* 全屏下拖宽 / 放大都没有意义，一并隐藏（关闭仍走标题栏的 ✕） */
   .agent-resizer,
   .agent-zoom {
     display: none;
