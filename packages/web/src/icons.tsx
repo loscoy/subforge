@@ -39,3 +39,5 @@ export const ISearch = (p: IP) => <S {...p}><circle cx="11" cy="11" r="8" /><pat
 export const IDots = (p: IP) => <S {...p}><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /><circle cx="5" cy="12" r="1" /></S>
 export const IX = (p: IP) => <S {...p}><path d="M18 6 6 18" /><path d="m6 6 12 12" /></S>
 export const IAlert = (p: IP) => <S {...p}><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z" /><path d="M12 9v4" /><path d="M12 17h.01" /></S>
+export const IMaximize = (p: IP) => <S {...p}><polyline points="15 3 21 3 21 9" /><polyline points="9 21 3 21 3 15" /><line x1="21" x2="14" y1="3" y2="10" /><line x1="3" x2="10" y1="21" y2="14" /></S>
+export const IMinimize = (p: IP) => <S {...p}><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" x2="21" y1="10" y2="3" /><line x1="3" x2="10" y1="21" y2="14" /></S>

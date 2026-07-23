@@ -13,12 +13,12 @@ import {
 } from '@mantine/core'
 import { useEffect, useState } from 'react'
 import { api, getToken, setToken } from './api'
-import { AgentChatPanel } from './components/AgentChatPanel'
+import { AgentDock } from './components/AgentDock'
 import { LoadError, PageSkeleton } from './components/AsyncState'
 import { Mcp } from './components/Mcp'
 import { Profiles } from './components/Profiles'
 import { Subscriptions } from './components/Subscriptions'
-import { IBrand, IMoon, IPlus, ISparkles, ISun, IX } from './icons'
+import { IBrand, IMoon, IPlus, ISparkles, ISun } from './icons'
 import { readView, writeView, type View } from './navigation'
 import type { Meta } from './types'
 
@@ -121,7 +121,7 @@ export function App() {
 
   if (needToken) {
     return (
-      <Box style={{ display: 'grid', placeItems: 'center', minHeight: '100dvh' }}>
+      <Box style={{ display: 'grid', placeItems: 'center', minHeight: '100svh' }}>
         <Card w={{ base: 'calc(100% - 32px)', xs: 400 }} padding="xl">
           <Brand />
           <Title order={3} mt="md">
@@ -209,11 +209,13 @@ export function App() {
             h={34}
             radius={7}
             px={16}
+            className="agent-toggle"
             leftSection={<ISparkles size={14} />}
             onClick={() => setAgentOpen((v) => !v)}
             aria-pressed={agentOpen}
+            aria-label={agentOpen ? '关闭 Agent 面板' : '打开 Agent 面板'}
           >
-            Agent
+            <span className="agent-toggle-label">Agent</span>
           </Button>
         </Group>
       </Box>
@@ -259,42 +261,14 @@ export function App() {
           <div id="sf-save-slot" className="save-slot" />
         </Box>
 
-        {/* Agent 抽屉 */}
+        {/* Agent 面板：右侧可拖宽的停靠栏，可放大为居中弹窗 */}
         {agentOpen && (
-          <Box component="aside" className="agent-drawer" aria-label="Agent 对话">
-            <Group justify="space-between" align="flex-start" px={16} py={14} className="agent-drawer-head" wrap="nowrap">
-              <Box>
-                <Group gap={7} wrap="nowrap">
-                  <Box c="violet" style={{ display: 'flex' }}>
-                    <ISparkles size={15} />
-                  </Box>
-                  <Text fw={600} fz={14}>
-                    Agent
-                  </Text>
-                </Group>
-                <Text fz={12} c="dimmed" mt={2}>
-                  上下文：{agentProfile ? `配置「${agentProfile.name}」` : '全局'}
-                </Text>
-              </Box>
-              <ActionIcon variant="subtle" color="gray" size={30} radius={7} onClick={() => setAgentOpen(false)} aria-label="关闭 Agent 面板">
-                <IX size={15} />
-              </ActionIcon>
-            </Group>
-            <Box px={14} pb={12} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <AgentChatPanel
-                key={agentProfile ? `profile:${agentProfile.id}` : 'global'}
-                threadId={agentProfile ? `profile:${agentProfile.id}` : 'global'}
-                hasAgent={!!meta?.hasAgent}
-                onChanged={() => window.dispatchEvent(new CustomEvent(AGENT_CHANGED_EVENT))}
-                context={
-                  agentProfile
-                    ? `用户正在编辑配置：id=${agentProfile.id}，name=「${agentProfile.name}」。除非明确指定其它档，所有 read/write/preview/validate/save_template/apply_template 操作都针对这个档（profileId=${agentProfile.id}）。`
-                    : undefined
-                }
-                placeholder="描述你想做的调整…"
-              />
-            </Box>
-          </Box>
+          <AgentDock
+            profile={agentProfile}
+            hasAgent={!!meta?.hasAgent}
+            onClose={() => setAgentOpen(false)}
+            onChanged={() => window.dispatchEvent(new CustomEvent(AGENT_CHANGED_EVENT))}
+          />
         )}
       </Box>
     </Box>

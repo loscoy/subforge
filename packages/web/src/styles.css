@@ -1,5 +1,7 @@
 /* 全局：仅保留 Mantine 之外需要的少量样式。字体在 index.html 引入。 */
 :root {
+  /* 内容列最大宽度：常见笔电（≤1680）满宽铺开，超宽屏才收口，避免表格拉成一条线 */
+  --sf-content-max: 1680px;
   --sf-app-background: #f3f5f8;
   --sf-chat-accent: #7c3aed;
   --sf-surface: #ffffff;
@@ -26,10 +28,12 @@
 [data-mantine-color-scheme='dark'] {
   --mantine-color-default-border: var(--sf-border-interactive);
 }
+/* 不要给 html / body 设 height:100%：手机上百分比高度按「大视口」(lvh) 解析，
+   工具栏可见时它比实际可视区高一截，页面就凭空多出一段能下滑的空白。
+   页面高度统一由 App 外壳的 min-height:100svh 决定。 */
 html,
 body {
   margin: 0;
-  height: 100%;
 }
 body {
   --mantine-color-body: var(--sf-app-background);
@@ -123,15 +127,22 @@ body {
 }
 
 /* ---------- 页面骨架 ---------- */
+/* 标题栏与内容区共用同一条内容列：两者宽度一致，卡片才不会「缩在左上角」 */
+.page-head,
 .page-body {
-  padding: 18px 28px 40px;
+  width: 100%;
+  max-width: var(--sf-content-max);
+  margin-inline: auto;
   box-sizing: border-box;
   min-width: 0;
 }
+.page-body {
+  padding: 18px 28px 40px;
+}
 
-/* ---------- Agent 抽屉 ---------- */
+/* ---------- Agent 面板（停靠栏 / 弹窗 双形态） ---------- */
 .agent-drawer {
-  width: 340px;
+  width: var(--sf-agent-width, 380px);
   flex-shrink: 0;
   border-left: 1px solid var(--sf-border-subtle);
   background: var(--sf-surface);
@@ -144,6 +155,79 @@ body {
 }
 .agent-drawer-head {
   border-bottom: 1px solid var(--sf-border-subtle);
+}
+
+/* 左边缘拖拽把手：命中区 11px（够手指也够鼠标），视觉只有 3px 一条线 */
+.agent-resizer {
+  position: absolute;
+  left: -5px;
+  top: 0;
+  bottom: 0;
+  width: 11px;
+  z-index: 2;
+  cursor: col-resize;
+  touch-action: none;
+}
+.agent-resizer::after {
+  content: '';
+  position: absolute;
+  left: 4px;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  border-radius: 3px;
+  background: transparent;
+  transition: background-color 160ms ease;
+}
+.agent-resizer:hover::after,
+.agent-resizer:focus-visible::after,
+.agent-drawer[data-resizing] .agent-resizer::after {
+  background: var(--mantine-color-violet-6);
+}
+.agent-resizer:focus-visible {
+  outline: none;
+}
+/* 拖拽期间锁住选中与光标，避免拖出一片蓝色选区 */
+[data-sf-resizing],
+[data-sf-resizing] * {
+  user-select: none !important;
+  cursor: col-resize !important;
+}
+
+.agent-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+  background: rgba(9, 10, 15, 0.55);
+  backdrop-filter: blur(2px);
+  animation: sf-fade-in 160ms ease-out;
+}
+.agent-drawer[data-maximized] {
+  position: fixed;
+  top: 4dvh;
+  bottom: 4dvh;
+  left: 0;
+  right: 0;
+  z-index: 60;
+  width: min(1180px, 92vw);
+  height: auto;
+  margin-inline: auto;
+  border: 1px solid var(--sf-border-subtle);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--mantine-shadow-md);
+  animation: sf-dialog-in 180ms ease-out;
+}
+@keyframes sf-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes sf-dialog-in {
+  from {
+    opacity: 0;
+    transform: scale(0.985);
+  }
 }
 
 /* ---------- 吸底保存栏 ---------- */
@@ -160,17 +244,26 @@ body {
   align-items: center;
   gap: 12px;
   flex-wrap: wrap;
-  padding: 12px 28px;
+  /* 底色通栏，内容对齐 .page-body 的内容列 */
+  padding: 12px max(28px, calc((100% - var(--sf-content-max)) / 2 + 28px));
   background: var(--sf-surface);
   border-top: 1px solid var(--sf-border-subtle);
   box-shadow: 0 -4px 16px rgba(16, 17, 20, 0.06);
 }
 
 /* ---------- 订阅表格 ---------- */
+/* 断点按「卡片自身宽度」而非视口：Agent 面板拉宽后主列会被挤窄，
+   此时视口仍是桌面尺寸，只有容器查询能及时切成堆叠布局，否则用量会压到更新时间上。 */
+.subs-table {
+  container-type: inline-size;
+}
+/* 表头与数据行是各自独立的 grid，列宽必须用「与内容无关」的定长/fr，
+   否则 auto 轨道会按各自内容算出不同宽度，表头和数据就对不上列。
+   用量列 280px：容得下「已用 / 总量」+「到期 …（剩 N 天）」整枚徽章，不再截成「到…」。 */
 .subs-table-head,
 .subs-table-row {
   display: grid;
-  grid-template-columns: 150px minmax(0, 1fr) 180px 110px 130px;
+  grid-template-columns: minmax(140px, 1fr) minmax(200px, 2.4fr) 280px 104px 104px;
   gap: 12px;
   align-items: center;
   padding: 14px 18px;
@@ -184,6 +277,63 @@ body {
 }
 .subs-table-row:hover {
   background: var(--sf-surface-subtle);
+}
+
+/* 卡片放不下五列（< 五列最小宽度之和）时改成卡片式三行：名称+操作 / 来源 / 用量+时间。
+   行间加分隔线，否则多条订阅会糊成一片认不出边界。 */
+@container (max-width: 900px) {
+  .subs-table-head {
+    display: none;
+  }
+  .subs-table-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    row-gap: 6px;
+    column-gap: 10px;
+    align-items: start;
+    padding: 14px 16px;
+  }
+  .subs-table-row + .subs-table-row {
+    border-top: 1px solid var(--sf-border-subtle);
+  }
+  .subs-table-row > :nth-child(1) {
+    grid-column: 1;
+    grid-row: 1;
+    /* 与右侧操作按钮（触屏下最小 44px 高）垂直居中对齐 */
+    min-height: 44px;
+    align-items: center;
+  }
+  .subs-table-row > :nth-child(5) {
+    grid-column: 2;
+    grid-row: 1;
+  }
+  .subs-table-row > :nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+  /* 用量 + 到期徽章允许换行，宁可占两行也不要把徽章压成「到…」 */
+  .subs-table-row > :nth-child(3) {
+    grid-column: 1;
+    grid-row: 3;
+    row-gap: 4px;
+  }
+  .subs-table-row > :nth-child(4) {
+    grid-column: 2;
+    grid-row: 3;
+    justify-self: end;
+    white-space: nowrap;
+  }
+}
+/* 再窄下去（Agent 面板拉到很宽 / 超窄机型）：用量与更新时间各占整行。
+   用量文本是 nowrap 的，挤在一行时会溢出轨道盖到时间上。 */
+@container (max-width: 280px) {
+  .subs-table-row > :nth-child(3),
+  .subs-table-row > :nth-child(4) {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+  .subs-table-row > :nth-child(4) {
+    grid-row: 4;
+  }
 }
 
 /* ---------- 配置页（左列表 + 右详情单卡片） ---------- */
@@ -444,6 +594,11 @@ body {
   .caret {
     animation: none;
   }
+  .agent-scrim,
+  .agent-drawer[data-maximized] {
+    animation: none;
+  }
+  .agent-resizer::after,
   .mantine-NavLink-root,
   .mantine-ActionIcon-root,
   .mantine-Button-root {
@@ -453,35 +608,6 @@ body {
 @media (max-width: 64em) {
   .profile-head-grid {
     grid-template-columns: minmax(0, 1fr) 140px;
-  }
-  .subs-table-head {
-    display: none;
-  }
-  /* 窄屏改为卡片式三行：名称+操作 / 来源 / 用量+时间 */
-  .subs-table-row {
-    grid-template-columns: minmax(0, 1fr) auto;
-    row-gap: 6px;
-  }
-  .subs-table-row > :nth-child(1) {
-    grid-column: 1;
-    grid-row: 1;
-  }
-  .subs-table-row > :nth-child(5) {
-    grid-column: 2;
-    grid-row: 1;
-  }
-  .subs-table-row > :nth-child(2) {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
-  .subs-table-row > :nth-child(3) {
-    grid-column: 1;
-    grid-row: 3;
-  }
-  .subs-table-row > :nth-child(4) {
-    grid-column: 2;
-    grid-row: 3;
-    justify-self: end;
   }
   .mcp-card {
     grid-template-columns: minmax(0, 1fr);
@@ -556,10 +682,15 @@ body {
     position: fixed;
     right: 0;
     top: 54px;
-    /* 手机上占满全宽，平板保持抽屉宽度 */
+    /* 手机上占满全宽，平板保持抽屉宽度；此时不再受拖拽宽度控制 */
     width: min(400px, 100dvw);
     z-index: 50;
     box-shadow: var(--mantine-shadow-md);
+  }
+  /* 手机上抽屉本就近似全屏，拖宽 / 放大都没有意义，一并隐藏 */
+  .agent-resizer,
+  .agent-zoom {
+    display: none;
   }
   .section-tabs {
     overflow-x: auto;
@@ -579,6 +710,27 @@ body {
   }
   .proxy-group-delete {
     justify-self: end;
+  }
+}
+/* 窄机型（≤ 360px）：顶栏会横向溢出，收紧内边距并把 Agent 按钮缩成图标 */
+@media (max-width: 22.5em) {
+  .topbar {
+    padding: 0 8px;
+  }
+  .topbar-brand {
+    padding-right: 4px;
+  }
+  .topbar-tab {
+    padding: 0 8px;
+  }
+  .topbar .mantine-Button-root {
+    padding-inline: 10px;
+  }
+  .agent-toggle-label {
+    display: none;
+  }
+  .agent-toggle .mantine-Button-section {
+    margin-inline-end: 0;
   }
 }
 
