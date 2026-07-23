@@ -2,6 +2,7 @@ import * as yaml from 'js-yaml'
 import { describe, expect, it, beforeEach } from 'vitest'
 import { getConfig } from '../config.js'
 import { NodeVmRunner } from '../sandbox/nodeVm.js'
+import { saveSettings } from '../settings.js'
 import { InMemoryStorage } from '../storage/index.js'
 import { createApp } from './app.js'
 
@@ -155,21 +156,42 @@ describe('远端 MCP', () => {
   }
   const toolsList = { jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }
 
-  const mk = (mcpToken?: string, checkNodes?: Parameters<typeof createApp>[0]['checkNodes']) =>
-    createApp({
-      storage: new InMemoryStorage(),
+  // MCP 口令现在存数据库（加密），不再来自环境变量
+  const MASTER_KEY = 'test-master-key'
+  const mk = async (mcpToken?: string, checkNodes?: Parameters<typeof createApp>[0]['checkNodes']) => {
+    const storage = new InMemoryStorage()
+    if (mcpToken) await saveSettings(storage, MASTER_KEY, { mcpToken })
+    return createApp({
+      storage,
       runner: new NodeVmRunner(),
-      config: { ...base, mcpToken } as Parameters<typeof createApp>[0]['config'],
+      config: { ...base, settingsKey: MASTER_KEY },
       checkNodes,
     })
+  }
 
-  it('未配置 MCP_TOKEN 时失败关闭', async () => {
-    const res = await mk().fetch(mcpRequest(initialize, 'anything'))
+  it('未配置 MCP 口令时失败关闭', async () => {
+    const res = await (await mk()).fetch(mcpRequest(initialize, 'anything'))
     expect(res.status).toBe(503)
   })
 
-  it('配置 MCP_TOKEN 后要求正确的 Bearer token', async () => {
-    const app = mk('mcp-secret')
+  it('配置了 SETTINGS_KEY 但口令存不进去时同样失败关闭', async () => {
+    // 模拟部署漏设 SETTINGS_KEY：库里有密文，但解不开 → 视为未配置
+    const storage = new InMemoryStorage()
+    await saveSettings(storage, MASTER_KEY, { mcpToken: 'mcp-secret' })
+    const app = createApp({ storage, runner: new NodeVmRunner(), config: { ...base, settingsKey: undefined } })
+    const res = await app.fetch(mcpRequest(initialize, 'mcp-secret'))
+    expect(res.status).toBe(503)
+  })
+
+  it('换过 SETTINGS_KEY 后旧密文解不开，也失败关闭', async () => {
+    const storage = new InMemoryStorage()
+    await saveSettings(storage, MASTER_KEY, { mcpToken: 'mcp-secret' })
+    const app = createApp({ storage, runner: new NodeVmRunner(), config: { ...base, settingsKey: 'another-key' } })
+    expect((await app.fetch(mcpRequest(initialize, 'mcp-secret'))).status).toBe(503)
+  })
+
+  it('配置 MCP 口令后要求正确的 Bearer token', async () => {
+    const app = await mk('mcp-secret')
     const missing = await app.fetch(mcpRequest(initialize))
     const wrong = await app.fetch(mcpRequest(initialize, 'wrong'))
 
@@ -179,14 +201,14 @@ describe('远端 MCP', () => {
   })
 
   it('正确 token 可以初始化 MCP', async () => {
-    const res = await mk('mcp-secret').fetch(mcpRequest(initialize, 'mcp-secret'))
+    const res = await (await mk('mcp-secret')).fetch(mcpRequest(initialize, 'mcp-secret'))
     expect(res.status).toBe(200)
     const body = await json(res)
     expect(body.result.serverInfo.name).toBe('subforge')
   })
 
   it('无状态端点仅接受 POST', async () => {
-    const app = mk('mcp-secret')
+    const app = await mk('mcp-secret')
     for (const method of ['GET', 'DELETE']) {
       const res = await app.fetch(
         new Request('http://x/mcp', {
@@ -203,8 +225,8 @@ describe('远端 MCP', () => {
   })
 
   it('按运行时能力裁剪工具', async () => {
-    const edgeRes = await mk('mcp-secret').fetch(mcpRequest(toolsList, 'mcp-secret'))
-    const nodeRes = await mk('mcp-secret', async () => []).fetch(mcpRequest(toolsList, 'mcp-secret'))
+    const edgeRes = await (await mk('mcp-secret')).fetch(mcpRequest(toolsList, 'mcp-secret'))
+    const nodeRes = await (await mk('mcp-secret', async () => [])).fetch(mcpRequest(toolsList, 'mcp-secret'))
     expect(edgeRes.status).toBe(200)
     expect(nodeRes.status).toBe(200)
     const edgeTools = (await json(edgeRes)).result.tools.map((tool: { name: string }) => tool.name)
@@ -216,7 +238,7 @@ describe('远端 MCP', () => {
   })
 
   it('管理元数据公开连接信息但不泄露 token', async () => {
-    const res = await mk('mcp-secret').fetch(new Request('http://x/api/meta'))
+    const res = await (await mk('mcp-secret')).fetch(new Request('http://x/api/meta'))
     const meta = await json(res)
 
     expect(meta.mcp).toMatchObject({
@@ -227,5 +249,73 @@ describe('远端 MCP', () => {
     expect(meta.mcp.tools.some((tool: { name: string }) => tool.name === 'list_profiles')).toBe(true)
     expect(meta.mcp.tools.some((tool: { name: string }) => tool.name === 'test_nodes')).toBe(false)
     expect(JSON.stringify(meta)).not.toContain('mcp-secret')
+  })
+})
+
+describe('运行时设置端点', () => {
+  const MASTER_KEY = 'test-master-key'
+  const base = { ...getConfig(), adminToken: undefined, allowNoAuth: true }
+  // 不给 settingsKey 设默认值：显式传入的 undefined 会被默认参数吃掉，
+  // 「未配置主密钥」这条用例就会静默失效（同 AgentChatPanel 的 height 坑）。
+  const mk = (settingsKey: string | undefined) => {
+    const storage = new InMemoryStorage()
+    return {
+      storage,
+      app: createApp({ storage, runner: new NodeVmRunner(), config: { ...base, settingsKey } }),
+    }
+  }
+  const put = (body: unknown) =>
+    new Request('http://x/api/settings', {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+  const read = async (res: Response) => res.json() as Promise<any>
+
+  it('保存后即时生效，且响应不含明文密钥', async () => {
+    const { app } = mk(MASTER_KEY)
+    const saved = await read(
+      await app.fetch(put({ agent: { baseURL: 'https://a/v1', model: 'm', apiKey: 'sk-abcdefghijkl' } })),
+    )
+    expect(saved.agent.apiKey).toEqual({ configured: true, hint: 'sk-…ijkl' })
+    expect(JSON.stringify(saved)).not.toContain('sk-abcdefghijkl')
+
+    // 同一实例下一个请求就能看到新配置（无需重启）
+    const meta = await read(await app.fetch(new Request('http://x/api/meta')))
+    expect(meta.hasAgent).toBe(false) // 未注入 makeAgent 的部署仍算不可用
+    const got = await read(await app.fetch(new Request('http://x/api/settings')))
+    expect(got.agent.model).toBe('m')
+  })
+
+  it('未配置 SETTINGS_KEY 时拒绝存密钥，但非密钥项照常保存', async () => {
+    const { app } = mk(undefined)
+    const rejected = await app.fetch(put({ mcpToken: 'x' }))
+    expect(rejected.status).toBe(409)
+
+    const ok = await app.fetch(put({ agent: { model: 'm' } }))
+    expect(ok.status).toBe(200)
+    const view = await read(ok)
+    expect(view.canStoreSecrets).toBe(false)
+    expect(view.agent.model).toBe('m')
+  })
+
+  it('非法引擎名被拒绝（perplexity 不能用于抓取）', async () => {
+    const { app } = mk(MASTER_KEY)
+    expect((await app.fetch(put({ web: { fetchEngine: 'perplexity' } }))).status).toBe(400)
+    expect((await app.fetch(put({ web: { searchEngine: 'perplexity' } }))).status).toBe(200)
+  })
+
+  it('诊断信息回传运行时自述', async () => {
+    const storage = new InMemoryStorage()
+    const app = createApp({
+      storage,
+      runner: new NodeVmRunner(),
+      config: { ...base, settingsKey: MASTER_KEY },
+      checkNodes: async () => [],
+      runtimeInfo: { runtime: 'node', storage: 'sqlite', sandbox: 'node:vm' },
+    })
+    const view = await read(await app.fetch(new Request('http://x/api/settings')))
+    expect(view.diagnostics).toMatchObject({ runtime: 'node', storage: 'sqlite', sandbox: 'node:vm', healthcheck: true })
+    expect(view.diagnostics.renderers.length).toBeGreaterThan(0)
   })
 })

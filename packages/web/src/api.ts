@@ -1,4 +1,14 @@
-import type { AgentEvent, AgentReply, Meta, PreviewResult, Profile, Subscription } from './types'
+import type {
+  AgentEvent,
+  AgentReply,
+  Meta,
+  PreviewResult,
+  ProbeResult,
+  Profile,
+  Settings,
+  SettingsPatch,
+  Subscription,
+} from './types'
 
 /** 管理口令（若服务端设了 ADMIN_TOKEN），存 localStorage。 */
 export function getToken(): string {
@@ -26,6 +36,11 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   meta: () => req<Meta>('/meta'),
+
+  getSettings: () => req<Settings>('/settings'),
+  saveSettings: (patch: SettingsPatch) => req<Settings>('/settings', { method: 'PUT', body: JSON.stringify(patch) }),
+  testAgent: (candidate: { baseURL?: string; model?: string; apiKey?: string }) =>
+    req<ProbeResult>('/settings/test', { method: 'POST', body: JSON.stringify(candidate) }),
 
   listSubscriptions: () => req<Subscription[]>('/subscriptions'),
   createSubscription: (b: Partial<Subscription>) =>

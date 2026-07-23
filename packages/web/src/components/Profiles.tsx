@@ -608,7 +608,7 @@ function ProfileDetail({
   )
 
   return (
-    <Box>
+    <Box className="profile-detail-body">
       {/* 头部：名称 / 输出格式 / 分享链接 / 更多 */}
       <Box px={20} pt={16} pb={6}>
         <Box className="profile-head-grid">
@@ -822,7 +822,7 @@ function ProfileDetail({
 
       {/* 脚本 */}
       {section === 'script' && (
-        <Box px={20} py={16}>
+        <Box px={20} py={16} className="script-pane">
           <Text c="dimmed" fz={13} mb={12}>
             留空则用表单；写代码可完全自定义（<span className="mono">return nodes</span> 变换，或{' '}
             <span className="mono">function main(config)</span> 覆写）。

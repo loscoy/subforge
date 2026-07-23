@@ -99,13 +99,13 @@ export function Subscriptions({ addOpened, onAddClose }: { addOpened: boolean; o
   return (
     <Box className="subs-page">
       {loading ? (
-        <Card maw={960}>
+        <Card>
           <ListSkeleton rows={4} />
         </Card>
       ) : loadError ? (
         <LoadError message={loadError} onRetry={() => void load(true)} />
       ) : subs.length === 0 ? (
-        <Card maw={960}>
+        <Card>
           <Stack align="center" gap={6} py={40} c="dimmed">
             <IInbox size={34} />
             <Text fw={600} c="var(--mantine-color-text)">
@@ -117,7 +117,7 @@ export function Subscriptions({ addOpened, onAddClose }: { addOpened: boolean; o
           </Stack>
         </Card>
       ) : (
-        <Card maw={960} padding={0}>
+        <Card padding={0} className="subs-table">
           <Box className="subs-table-head">
             <span>名称</span>
             <span>来源</span>
@@ -140,7 +140,8 @@ export function Subscriptions({ addOpened, onAddClose }: { addOpened: boolean; o
               <Text className="mono" fz={12} c="dimmed" truncate>
                 {s.url || (s.content ? '手工节点' : '—')}
               </Text>
-              <Group gap={6} wrap="nowrap">
+              {/* 允许换行：窄屏放不下时到期徽章换行，而不是被压成「到…」 */}
+              <Group gap={6}>
                 <Text fz={13} style={{ whiteSpace: 'nowrap' }}>
                   {usage(s)}
                 </Text>

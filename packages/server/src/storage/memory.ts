@@ -8,6 +8,7 @@ export class InMemoryStorage implements Storage {
   private templates = new Map<string, StoredTemplate>()
   private messages: AgentMessage[] = []
   private workingMemory = ''
+  private settings: string | undefined
 
   async listSubscriptions(): Promise<Subscription[]> {
     return [...this.subs.values()].sort((a, b) => a.createdAt - b.createdAt)
@@ -77,6 +78,13 @@ export class InMemoryStorage implements Storage {
   }
   async setWorkingMemory(text: string) {
     this.workingMemory = text
+  }
+
+  async getSettings() {
+    return this.settings
+  }
+  async setSettings(json: string) {
+    this.settings = json
   }
 
   async close() {}

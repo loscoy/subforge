@@ -110,5 +110,10 @@ export interface Storage {
   getWorkingMemory(): Promise<string>
   setWorkingMemory(text: string): Promise<void>
 
+  // 运行时设置（原始 JSON 字符串）。存储层只当它是块不透明数据：
+  // 加解密与语义都在 settings.ts，换加密方案不影响三个存储实现。
+  getSettings(): Promise<string | undefined>
+  setSettings(json: string): Promise<void>
+
   close(): Promise<void>
 }

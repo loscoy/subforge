@@ -3,10 +3,19 @@ import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type ConversionProfile, type ScriptRunner } from '@subforge/core'
 import type { NodeChecker } from '../health.js'
-import type { AgentRunner } from '../agent/index.js'
+import type { AgentModelConfig, AgentRunner } from '../agent/index.js'
+import { probeAgentModel } from '../agent/probe.js'
 import type { ServerConfig } from '../config.js'
 import { handleMcpHttpRequest } from '../mcp/http.js'
 import { timingSafeEqual } from '../security.js'
+import {
+  loadSettings,
+  saveSettings,
+  settingsPatchSchema,
+  SettingsKeyMissingError,
+  toAgentConfig,
+  toSettingsView,
+} from '../settings.js'
 import type { Profile, StoredTemplate, Storage, Subscription } from '../storage/index.js'
 import { buildTools } from '../tools/registry.js'
 import {
@@ -23,10 +32,22 @@ export interface AppDeps {
   storage: Storage
   runner: ScriptRunner
   config: ServerConfig
-  /** 构建 agent（config.agent 存在时提供） */
-  makeAgent?: () => AgentRunner
+  /**
+   * 用运行时设置里的模型配置构建 agent。设置改了下一个请求就用新的，
+   * 所以这里收参数而不是闭包捕获——两个运行时都按请求现造。
+   */
+  makeAgent?: (model: AgentModelConfig) => AgentRunner
   /** 测活能力（Node 注入；边缘缺省则该端点返回 501） */
   checkNodes?: NodeChecker
+  /** 由入口自述当前跑在哪套实现上，供设置页的诊断卡展示 */
+  runtimeInfo?: RuntimeInfo
+}
+
+/** 运行时能力（运行时 / 存储 / 沙箱）的只读自述，给设置页的诊断卡用。 */
+export interface RuntimeInfo {
+  runtime: string
+  storage: string
+  sandbox: string
 }
 
 const EMPTY_PROFILE: ConversionProfile = {
@@ -39,6 +60,16 @@ export function createApp(deps: AppDeps): Hono {
   const app = new Hono()
   const mcpTools = buildTools({ checkNodes: !!deps.checkNodes }).map(({ name, description }) => ({ name, description }))
   app.use('/api/*', cors())
+
+  // 设置每次用时现读（单行查询）。分享出口 /sub/:token 这条热路径完全不碰它。
+  const settingsOf = () => loadSettings(storage, config.settingsKey)
+  /** 设置齐备且入口注入了 makeAgent 时才拿得到 agent，否则视为未配置。 */
+  const agentOf = async (): Promise<AgentRunner | undefined> => {
+    if (!deps.makeAgent) return undefined
+    const model = toAgentConfig(await settingsOf())
+    return model ? deps.makeAgent(model) : undefined
+  }
+  const AGENT_UNSET = { error: '未配置 Agent。请在「设置」页填写模型 Base URL / API Key / 模型名。' }
 
   // ---- 公开：分享出口 ----
   app.get('/sub/:token', async (c) => {
@@ -62,8 +93,10 @@ export function createApp(deps: AppDeps): Hono {
 
   // ---- 远端 MCP（独立口令，始终失败关闭） ----
   app.all('/mcp', async (c) => {
-    if (!config.mcpToken) {
-      return c.json({ error: 'Remote MCP is disabled because MCP_TOKEN is not configured.' }, 503)
+    // 口令解不出来（没配 / SETTINGS_KEY 缺失或换过）一律当没配，拒绝服务。
+    const mcpToken = (await settingsOf()).mcpToken
+    if (!mcpToken) {
+      return c.json({ error: 'Remote MCP is disabled because no MCP token is configured.' }, 503)
     }
     if (c.req.method !== 'POST') {
       c.header('Allow', 'POST')
@@ -71,7 +104,7 @@ export function createApp(deps: AppDeps): Hono {
     }
 
     const match = c.req.header('Authorization')?.match(/^Bearer\s+(.+)$/i)
-    if (!(await timingSafeEqual(match?.[1] ?? '', config.mcpToken))) {
+    if (!(await timingSafeEqual(match?.[1] ?? '', mcpToken))) {
       c.header('WWW-Authenticate', 'Bearer')
       return c.json({ error: 'Unauthorized' }, 401)
     }
@@ -102,19 +135,63 @@ export function createApp(deps: AppDeps): Hono {
     console.warn('⚠ SubForge 正在【无鉴权】模式运行（SUBFORGE_ALLOW_NO_AUTH=1）：任何人都可调用管理接口/执行脚本，切勿暴露到公网。')
   }
 
-  api.get('/meta', (c) =>
-    c.json({
+  api.get('/meta', async (c) => {
+    const settings = await settingsOf()
+    return c.json({
       renderers: listRenderers(),
-      hasAgent: !!deps.makeAgent,
+      hasAgent: !!deps.makeAgent && !!toAgentConfig(settings),
       scriptDts: SCRIPT_DTS,
       mcp: {
-        enabled: !!config.mcpToken,
+        enabled: !!settings.mcpToken,
         endpoint: '/mcp',
         transport: 'streamable-http' as const,
         tools: mcpTools,
       },
-    }),
-  )
+    })
+  })
+
+  // ---- 运行时设置 ----
+  // 刻意不进 tools/registry.ts：模型不该能读写自己的 API key，
+  // MCP 那侧的外部 agent 更不该。设置只经这几个受 ADMIN_TOKEN 保护的端点。
+  // GET 与 PUT 回同一个形状，前端保存后可直接用返回值刷新界面。
+  const settingsView = async () => ({
+    ...toSettingsView(await settingsOf(), !!config.settingsKey),
+    diagnostics: {
+      ...(deps.runtimeInfo ?? { runtime: 'unknown', storage: 'unknown', sandbox: 'unknown' }),
+      renderers: listRenderers(),
+      healthcheck: !!deps.checkNodes,
+    },
+  })
+
+  api.get('/settings', async (c) => c.json(await settingsView()))
+
+  api.put('/settings', async (c) => {
+    const parsed = settingsPatchSchema.safeParse(await c.req.json().catch(() => null))
+    if (!parsed.success) return c.json({ error: `设置格式不正确：${parsed.error.issues[0]?.message ?? ''}` }, 400)
+    try {
+      await saveSettings(storage, config.settingsKey, parsed.data)
+      return c.json(await settingsView())
+    } catch (e) {
+      if (e instanceof SettingsKeyMissingError) return c.json({ error: e.message }, 409)
+      throw e
+    }
+  })
+
+  // 用请求体里的候选配置探测，允许先测再存；未传的字段回落到已存值。
+  api.post('/settings/test', async (c) => {
+    type Probe = { baseURL?: string; model?: string; apiKey?: string }
+    const body = await c.req.json<Probe>().catch((): Probe => ({}))
+    const saved = await settingsOf()
+    const model: AgentModelConfig = {
+      baseURL: body.baseURL?.trim() || saved.agent.baseURL || '',
+      model: body.model?.trim() || saved.agent.model || '',
+      apiKey: body.apiKey?.trim() || saved.agent.apiKey || '',
+    }
+    if (!model.baseURL || !model.model || !model.apiKey) {
+      return c.json({ ok: false, latencyMs: 0, error: 'Base URL / 模型名 / API Key 三项都要有才能测试。' })
+    }
+    return c.json(await probeAgentModel(model))
+  })
 
   // 订阅
   api.get('/subscriptions', async (c) => c.json(await storage.listSubscriptions()))
@@ -265,21 +342,22 @@ export function createApp(deps: AppDeps): Hono {
   // Agent
   api.get('/agent/messages/:threadId', async (c) => c.json(await storage.listMessages(c.req.param('threadId'))))
   api.post('/agent/chat', async (c) => {
-    if (!deps.makeAgent) return c.json({ error: '未配置 Agent（缺 OPENAI_* 环境变量）' }, 400)
+    const agent = await agentOf()
+    if (!agent) return c.json(AGENT_UNSET, 400)
     const { threadId, message, context } = await c.req.json<{ threadId: string; message: string; context?: string }>()
     if (!threadId || !message) return c.json({ error: '缺 threadId 或 message' }, 400)
     try {
-      const reply = await deps.makeAgent().run(threadId, message, context)
+      const reply = await agent.run(threadId, message, context)
       return c.json(reply)
     } catch (e) {
       return c.json({ error: e instanceof Error ? e.message : String(e) }, 500)
     }
   })
   api.post('/agent/stream', async (c) => {
-    if (!deps.makeAgent) return c.json({ error: '未配置 Agent（缺 OPENAI_* 环境变量）' }, 400)
+    const agent = await agentOf()
+    if (!agent) return c.json(AGENT_UNSET, 400)
     const { threadId, message, context } = await c.req.json<{ threadId: string; message: string; context?: string }>()
     if (!threadId || !message) return c.json({ error: '缺 threadId 或 message' }, 400)
-    const agent = deps.makeAgent()
     return streamSSE(c, async (stream) => {
       try {
         for await (const ev of agent.runStream(threadId, message, context)) {

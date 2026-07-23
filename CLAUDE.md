@@ -72,7 +72,30 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 1. **工具 handler 抛错要在适配层被捕获并作为结果返回**（`aiSdk.ts` 里 `execute` 已 try/catch 返回 `{ error }`）。直接把异常抛给 AI SDK 会被当成致命错误、直接中断整段流式对话。
 2. 部署缺失的能力用 `buildTools({ ... })` 裁剪掉，别让模型调用注定失败的工具。
 
-例外：**Agent 联网工具（web_search / web_fetch）不在 registry**，而在 `agent/webTools.ts`——它是内嵌 Agent 的部署级增强（MCP 侧外部 agent 自带联网能力，不需要我们提供）。抽象为 `WebCapability` 两种供给形态：`providerTools`（注入请求体、由 LLM 网关服务端执行，如 OpenRouter server tools，经 `injectProviderTools` 在自定义 fetch 里改写请求体）与 `registryTools`（本地 function tool，如 Tavily 实现）。环境变量：`AGENT_WEB_TOOLS=openrouter|tavily`、`AGENT_WEB_ENGINE`、`AGENT_WEB_MAX_TOOL_CALLS`、`AGENT_WEB_MAX_RESULTS`、`TAVILY_API_KEY`（tavily 必需，失败关闭）。新增供应商只在 `buildWebCapability` 加分支。
+例外：**Agent 联网工具（web_search / web_fetch）不在 registry**，而在 `agent/webTools.ts`——它是内嵌 Agent 的部署级增强（MCP 侧外部 agent 自带联网能力，不需要我们提供）。抽象为 `WebCapability` 两种供给形态：`providerTools`（注入请求体、由 LLM 网关服务端执行，如 OpenRouter server tools，经 `injectProviderTools` 在自定义 fetch 里改写请求体）与 `registryTools`（本地 function tool，如 Tavily / Exa 实现）。配置来自数据库设置（`settings.ts::toWebToolsConfig`）。
+
+**搜索与抓取各自选供应商**（`searchProvider` / `fetchProvider`），可以混搭——两者都只是往上面两个数组里塞东西。唯一约束是**同一个能力只能有一个供应商**，否则模型会看到两个同名 `web_search`。新增供应商：写 `xxxSearchTool` / `xxxFetchTool`，再到 `buildWebCapability` 的两个 switch 里各加一行。
+
+⚠️ `providerTools` 有前提：**只有模型经 OpenRouter 转发时才生效**。换成直连 OpenAI 或本地 Ollama，`openrouter:*` 声明会被上游忽略；`registryTools` 是我们自己执行的，与模型供应商无关。设置页对此有提示。
+
+### 引导配置 vs 运行时设置
+
+两套配置泾渭分明，别混：
+
+| | 引导配置（`config.ts::ServerConfig`） | 运行时设置（`settings.ts::Settings`） |
+|---|---|---|
+| 来源 | 环境变量，启动后不变 | 数据库 `kv` 表的 `settings` 行 |
+| 内容 | `PORT` / `DB_PATH` / `WEB_DIR` / `ADMIN_TOKEN` / `SUBFORGE_ALLOW_NO_AUTH` / `SETTINGS_KEY` | 模型三件套、联网工具、远端 MCP 口令 |
+| 改动生效 | 重启 | 下一个请求（路由里 `settingsOf()` 现读） |
+| 归属 | 「怎么把服务跑起来」 | 「跑起来之后干什么」 |
+
+数据库是运行时设置的唯一真相，**不再读 `OPENAI_*` / `MCP_TOKEN` / `AGENT_WEB_*`**（已废弃）。这样 Node 与 Workers 行为完全一致：都是按请求现读，不存在「某个 isolate 缓存了旧配置」。热路径 `/sub/:token` 不读设置。
+
+密钥字段（`agent.apiKey` / `web.tavilyApiKey` / `mcpToken`）在库里是 `enc:v1:<iv>:<ct>` 密文，用 env 的 `SETTINGS_KEY` 经 AES-GCM 加解密（`secrets.ts`，只用 WebCrypto，边缘可移植）。**解不开一律返回 `undefined` 而不是抛错**——没配主密钥、主密钥换过、密文损坏，对调用方是同一件事：该密钥不可用，按未配置处理（失败关闭）。
+
+`PUT /api/settings` 的密钥字段是三态：**字段缺席**=保持不变、**字符串**=设为新值、**null**=清除。前端拿不到明文，只有这样才能在不重填密钥的前提下改其它字段。`GET` 只回 `{ configured, hint }` 掩码。
+
+**设置刻意不进 `tools/registry.ts`**：模型不该能读写自己的 API key，MCP 侧的外部 agent 更不该。只经受 `ADMIN_TOKEN` 保护的 `/api/settings*` 端点访问。
 
 ### 脚本两种模式（自动识别）
 
@@ -97,11 +120,15 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 
 版本快照里 `script` 用 `null` 哨兵表示「无脚本」——`JSON.stringify` 会丢弃 `undefined`，否则回滚无法清空脚本（见 `service.ts::saveProfileWithVersion` / `rollbackProfile`）。
 
+只往已有的 `kv` 表塞新键（如 `settings`）不需要迁移文件，上面那五步可跳过——但仍要在三个实现里各加一份读写，并补进契约测试。
+
 ### 鉴权与安全
 
 管理接口**失败关闭**：设了 `ADMIN_TOKEN` 则校验；未设且未显式 `SUBFORGE_ALLOW_NO_AUTH=1` 时 `/api/*` 一律 503。分享出口 `/sub/:token` 始终公开，不受影响。
 
 抓取订阅 URL 前必须过 `net.ts::assertPublicHttpUrl`（SSRF 防护：拒绝 localhost / 私网 / `169.254.169.254` 等）。任何新增的「抓取用户提供的 URL」的代码都要走这个函数。
+
+**例外：模型 Base URL 不做私网校验**（`agent/probe.ts` 与 AI SDK 的请求）。本地大模型（Ollama / LM Studio 的 `http://localhost:11434/v1`）是自托管的一等场景，而这条路径在 `ADMIN_TOKEN` 之后——能调它的人已经能跑脚本了，拦私网只会挡掉正常用法。只校验必须是 http(s)。
 
 注意 `NodeVmRunner` 不是强安全边界（`node:vm`），仅适用于单人自用；QuickJS（边缘）才是真隔离。
 

@@ -153,6 +153,17 @@ export class D1Storage implements Storage {
       .run()
   }
 
+  async getSettings(): Promise<string | undefined> {
+    const r = (await this.db.prepare("SELECT v FROM kv WHERE k = 'settings'").first('v')) as string | null
+    return r ?? undefined
+  }
+  async setSettings(json: string): Promise<void> {
+    await this.db
+      .prepare("INSERT INTO kv (k,v) VALUES ('settings',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v")
+      .bind(json)
+      .run()
+  }
+
   async close(): Promise<void> {
     /* D1 无需显式关闭 */
   }

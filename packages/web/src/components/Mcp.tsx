@@ -46,7 +46,7 @@ export function Mcp({ meta }: { meta: Meta['mcp'] }) {
   }[exampleMode]
 
   return (
-    <Card padding={0} maw={1080} className="mcp-card">
+    <Card padding={0} className="mcp-card">
       {/* 左：远端连接 */}
       <Box className="mcp-conn">
         <Group justify="space-between" px={20} py={16} className="mcp-pane-head">

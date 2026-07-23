@@ -13,12 +13,13 @@ import {
 } from '@mantine/core'
 import { useEffect, useState } from 'react'
 import { api, getToken, setToken } from './api'
-import { AgentChatPanel } from './components/AgentChatPanel'
+import { AgentDock } from './components/AgentDock'
 import { LoadError, PageSkeleton } from './components/AsyncState'
 import { Mcp } from './components/Mcp'
 import { Profiles } from './components/Profiles'
+import { Settings } from './components/Settings'
 import { Subscriptions } from './components/Subscriptions'
-import { IBrand, IMoon, IPlus, ISparkles, ISun, IX } from './icons'
+import { IBrand, IMoon, IPlus, ISparkles, ISun } from './icons'
 import { readView, writeView, type View } from './navigation'
 import type { Meta } from './types'
 
@@ -26,6 +27,7 @@ const TABS: { key: View; label: string; title: string; sub: string }[] = [
   { key: 'subs', label: '订阅', title: '订阅', sub: '添加机场订阅或手工节点，SubForge 会抓取并解析。' },
   { key: 'profiles', label: '配置', title: '配置', sub: '把订阅按你的规则转成可用配置，用分享链接分发。' },
   { key: 'mcp', label: 'MCP', title: 'MCP', sub: '管理外部 Agent 的远端连接与工具访问。' },
+  { key: 'settings', label: '设置', title: '设置', sub: '模型、联网工具与远端 MCP 口令，存数据库、改完即时生效。' },
 ]
 
 /** ProfileDetail 通过该事件通知「Agent 改动了当前配置」，抽屉与详情面板解耦。 */
@@ -121,7 +123,7 @@ export function App() {
 
   if (needToken) {
     return (
-      <Box style={{ display: 'grid', placeItems: 'center', minHeight: '100dvh' }}>
+      <Box style={{ display: 'grid', placeItems: 'center', minHeight: '100svh' }}>
         <Card w={{ base: 'calc(100% - 32px)', xs: 400 }} padding="xl">
           <Brand />
           <Title order={3} mt="md">
@@ -161,9 +163,9 @@ export function App() {
   const agentProfile = tab === 'profiles' ? profileCtx : null
 
   return (
-    // 最小高度用 svh（小视口）而非 dvh：手机浏览器工具栏收起时 dvh 动态变大，
-    // 会把不足一屏的页面撑出一段「能下滑的空白」。
-    <Box style={{ minHeight: '100svh', display: 'flex', flexDirection: 'column' }}>
+    // 配置页走「撑满视口」模式：整页不滚，滚动收进编辑器 / 详情各自的区域，
+    // 编辑器才能吃到尽可能多的高度。其余页面是普通文档流，按内容长短自然滚。
+    <Box className="app-shell" data-fill={tab === 'profiles' || undefined}>
       {/* 顶栏导航 */}
       <Box component="header" className="topbar">
         <Box className="topbar-brand">
@@ -209,18 +211,20 @@ export function App() {
             h={34}
             radius={7}
             px={16}
+            className="agent-toggle"
             leftSection={<ISparkles size={14} />}
             onClick={() => setAgentOpen((v) => !v)}
             aria-pressed={agentOpen}
+            aria-label={agentOpen ? '关闭 Agent 面板' : '打开 Agent 面板'}
           >
-            Agent
+            <span className="agent-toggle-label">Agent</span>
           </Button>
         </Group>
       </Box>
 
-      <Box style={{ display: 'flex', flex: 1, alignItems: 'stretch' }}>
+      <Box className="app-row">
         {/* 主内容列 */}
-        <Box style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <Box className="app-main">
           <Group justify="space-between" align="flex-end" gap={16} px={28} pt={22} className="page-head">
             <Box>
               <Title order={1} fz={21} fw={600}>
@@ -251,6 +255,8 @@ export function App() {
                   />
                 )}
                 {tab === 'mcp' && <Mcp meta={meta.mcp} />}
+                {/* 设置会改动 Agent / MCP 的可用性，保存后重拉 meta 让顶栏状态灯与 MCP 页同步 */}
+                {tab === 'settings' && <Settings onSaved={loadMeta} />}
               </>
             )}
           </Box>
@@ -259,42 +265,14 @@ export function App() {
           <div id="sf-save-slot" className="save-slot" />
         </Box>
 
-        {/* Agent 抽屉 */}
+        {/* Agent 面板：右侧可拖宽的停靠栏，可放大为居中弹窗 */}
         {agentOpen && (
-          <Box component="aside" className="agent-drawer" aria-label="Agent 对话">
-            <Group justify="space-between" align="flex-start" px={16} py={14} className="agent-drawer-head" wrap="nowrap">
-              <Box>
-                <Group gap={7} wrap="nowrap">
-                  <Box c="violet" style={{ display: 'flex' }}>
-                    <ISparkles size={15} />
-                  </Box>
-                  <Text fw={600} fz={14}>
-                    Agent
-                  </Text>
-                </Group>
-                <Text fz={12} c="dimmed" mt={2}>
-                  上下文：{agentProfile ? `配置「${agentProfile.name}」` : '全局'}
-                </Text>
-              </Box>
-              <ActionIcon variant="subtle" color="gray" size={30} radius={7} onClick={() => setAgentOpen(false)} aria-label="关闭 Agent 面板">
-                <IX size={15} />
-              </ActionIcon>
-            </Group>
-            <Box px={14} pb={12} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <AgentChatPanel
-                key={agentProfile ? `profile:${agentProfile.id}` : 'global'}
-                threadId={agentProfile ? `profile:${agentProfile.id}` : 'global'}
-                hasAgent={!!meta?.hasAgent}
-                onChanged={() => window.dispatchEvent(new CustomEvent(AGENT_CHANGED_EVENT))}
-                context={
-                  agentProfile
-                    ? `用户正在编辑配置：id=${agentProfile.id}，name=「${agentProfile.name}」。除非明确指定其它档，所有 read/write/preview/validate/save_template/apply_template 操作都针对这个档（profileId=${agentProfile.id}）。`
-                    : undefined
-                }
-                placeholder="描述你想做的调整…"
-              />
-            </Box>
-          </Box>
+          <AgentDock
+            profile={agentProfile}
+            hasAgent={!!meta?.hasAgent}
+            onClose={() => setAgentOpen(false)}
+            onChanged={() => window.dispatchEvent(new CustomEvent(AGENT_CHANGED_EVENT))}
+          />
         )}
       </Box>
     </Box>
