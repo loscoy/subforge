@@ -50,6 +50,24 @@ export interface Version {
   createdAt: number
 }
 
+/** 一次工具调用的完整记录。 */
+export interface AgentToolStep {
+  /** provider 给的调用 id，流式下用它把「调用」与「结果」配对 */
+  id?: string
+  tool: string
+  args?: unknown
+  /** 成功时的返回值 */
+  result?: unknown
+  /** 失败时的错误信息（与 result 二选一） */
+  error?: string
+}
+
+/** assistant 消息的中间过程：思考文本 + 工具调用明细，用于刷新后仍能展开回看。 */
+export interface AgentTrace {
+  reasoning?: string
+  steps?: AgentToolStep[]
+}
+
 /** Agent 会话消息。 */
 export interface AgentMessage {
   id: string
@@ -58,7 +76,25 @@ export interface AgentMessage {
   content: string
   /** assistant 消息附带的本轮工具调用名（用于刷新后仍能展示工具链）。 */
   tools?: string[]
+  /**
+   * 本轮的中间过程。tools 只有名字，够画一排 chip；trace 带参数/结果/思考，
+   * 够展开细看。两者并存是为了兼容 0004 之前写入的历史消息。
+   */
+  trace?: AgentTrace
   createdAt: number
+}
+
+/**
+ * 一组 Agent 对话会话。会话 id 即消息表的 threadId——不新增外键列，
+ * 老的 'global' / 'profile:<id>' 线程经 0005 回填后原地变成会话记录。
+ */
+export interface Session {
+  id: string
+  title: string
+  /** 归属的配置档 id；缺省 = 全局会话组 */
+  profileId?: string
+  createdAt: number
+  updatedAt: number
 }
 
 /** 服务端保存的模板（可跨设备、被 agent 管理）。 */
@@ -102,6 +138,16 @@ export interface Storage {
   getTemplate(id: string): Promise<StoredTemplate | undefined>
   upsertTemplate(t: StoredTemplate): Promise<void>
   deleteTemplate(id: string): Promise<void>
+
+  // Agent 会话（threadId = session.id）
+  /** 列出某会话组，按 updatedAt 倒序。profileId=null 取全局组（profileId 为空的会话）。 */
+  listSessions(profileId: string | null): Promise<Session[]>
+  getSession(id: string): Promise<Session | undefined>
+  upsertSession(s: Session): Promise<void>
+  /** 只刷新 updatedAt（发消息时用，让会话浮到列表顶部），不存在则无操作。 */
+  touchSession(id: string, at: number): Promise<void>
+  /** 删除会话，连带删除该 threadId 的全部消息。 */
+  deleteSession(id: string): Promise<void>
 
   // Agent 记忆
   listMessages(threadId: string): Promise<AgentMessage[]>

@@ -64,19 +64,36 @@ export interface PreviewResult {
   error?: string
 }
 
+/** 一次工具调用。result 与 error 二选一；两者都缺表示还在跑。 */
 export interface AgentStep {
+  id?: string
   tool: string
-  args: unknown
-  result: unknown
+  args?: unknown
+  result?: unknown
+  error?: string
 }
 export interface AgentReply {
   text: string
   steps: AgentStep[]
 }
+/** assistant 消息的中间过程，随消息落库，刷新后仍可展开。 */
+export interface AgentTrace {
+  reasoning?: string
+  steps?: AgentStep[]
+}
+/** 一组 Agent 对话会话。id 即消息线程 id。 */
+export interface Session {
+  id: string
+  title: string
+  profileId?: string
+  createdAt: number
+  updatedAt: number
+}
 export type AgentEvent =
   | { type: 'text'; delta: string }
-  | { type: 'tool-call'; tool: string }
-  | { type: 'tool-result'; tool: string }
+  | { type: 'reasoning'; delta: string }
+  | { type: 'tool-call'; id: string; tool: string; args?: unknown }
+  | { type: 'tool-result'; id: string; tool: string; result?: unknown; error?: string }
   | { type: 'error'; error: string }
   | { type: 'done'; text: string }
 export interface Meta {

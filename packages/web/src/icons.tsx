@@ -43,3 +43,7 @@ export const IMaximize = (p: IP) => <S {...p}><polyline points="15 3 21 3 21 9" 
 export const IMinimize = (p: IP) => <S {...p}><polyline points="4 14 10 14 10 20" /><polyline points="20 10 14 10 14 4" /><line x1="14" x2="21" y1="10" y2="3" /><line x1="3" x2="10" y1="21" y2="14" /></S>
 export const IKey = (p: IP) => <S {...p}><path d="m15.5 7.5 2.3 2.3a1 1 0 0 0 1.4 0l2.1-2.1a1 1 0 0 0 0-1.4L19 4" /><path d="m21 2-9.6 9.6" /><circle cx="7.5" cy="15.5" r="5.5" /></S>
 export const IPulse = (p: IP) => <S {...p}><path d="M3 12h4l3-9 4 18 3-9h4" /></S>
+export const IChevron = (p: IP) => <S {...p}><path d="m9 18 6-6-6-6" /></S>
+export const IPencil = (p: IP) => <S {...p}><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /><path d="m15 5 4 4" /></S>
+export const IStop = (p: IP) => <S {...p}><rect x="6.5" y="6.5" width="11" height="11" rx="1.6" fill="currentColor" stroke="none" /></S>
+export const IBulb = (p: IP) => <S {...p}><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5.6 5.6 0 0 0 18 8a6 6 0 0 0-12 0c0 1 .2 2.2 1.5 3.5.8.8 1.3 1.5 1.5 2.5" /><path d="M9 18h6" /><path d="M10 22h4" /></S>

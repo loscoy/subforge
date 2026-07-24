@@ -4,6 +4,7 @@ import { streamSSE } from 'hono/streaming'
 import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type ConversionProfile, type ScriptRunner } from '@subforge/core'
 import type { NodeChecker } from '../health.js'
 import type { AgentModelConfig, AgentRunner } from '../agent/index.js'
+import { fallbackTitle, generateSessionTitle } from '../agent/index.js'
 import { probeAgentModel } from '../agent/probe.js'
 import type { ServerConfig } from '../config.js'
 import { handleMcpHttpRequest } from '../mcp/http.js'
@@ -16,7 +17,7 @@ import {
   toAgentConfig,
   toSettingsView,
 } from '../settings.js'
-import type { Profile, StoredTemplate, Storage, Subscription } from '../storage/index.js'
+import type { Profile, Session, StoredTemplate, Storage, Subscription } from '../storage/index.js'
 import { buildTools } from '../tools/registry.js'
 import {
   buildProfileOutput,
@@ -339,6 +340,40 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(await storage.getProfile(profileId))
   })
 
+  // Agent 会话（threadId = session.id）
+  // 会话按「组」隔离：profileId 查询参数存在时取该配置档的会话组，否则取全局组。
+  api.get('/agent/sessions', async (c) => {
+    const profileId = c.req.query('profileId') || null
+    return c.json(await storage.listSessions(profileId))
+  })
+  // 建会话时顺手起标题：等模型生成完再返回（带超时降级），不预建空会话——
+  // 前端点「新对话」只是本地草稿态，发首条消息才落库，列表里不会堆没说过话的空壳。
+  api.post('/agent/sessions', async (c) => {
+    const { profileId, firstMessage } = await c.req.json<{ profileId?: string; firstMessage?: string }>()
+    const first = (firstMessage ?? '').trim()
+    if (!first) return c.json({ error: '缺 firstMessage' }, 400)
+    const model = toAgentConfig(await settingsOf())
+    const title = model ? await generateSessionTitle(model, first) : fallbackTitle(first)
+    const ts = now()
+    const session: Session = { id: newId(), title, profileId: profileId || undefined, createdAt: ts, updatedAt: ts }
+    await storage.upsertSession(session)
+    return c.json(session)
+  })
+  api.patch('/agent/sessions/:id', async (c) => {
+    const session = await storage.getSession(c.req.param('id'))
+    if (!session) return c.json({ error: '会话不存在' }, 404)
+    const { title } = await c.req.json<{ title?: string }>()
+    const next = (title ?? '').trim()
+    if (!next) return c.json({ error: '标题不能为空' }, 400)
+    const updated: Session = { ...session, title: next, updatedAt: now() }
+    await storage.upsertSession(updated)
+    return c.json(updated)
+  })
+  api.delete('/agent/sessions/:id', async (c) => {
+    await storage.deleteSession(c.req.param('id'))
+    return c.json({ ok: true })
+  })
+
   // Agent
   api.get('/agent/messages/:threadId', async (c) => c.json(await storage.listMessages(c.req.param('threadId'))))
   api.post('/agent/chat', async (c) => {
@@ -346,6 +381,7 @@ export function createApp(deps: AppDeps): Hono {
     if (!agent) return c.json(AGENT_UNSET, 400)
     const { threadId, message, context } = await c.req.json<{ threadId: string; message: string; context?: string }>()
     if (!threadId || !message) return c.json({ error: '缺 threadId 或 message' }, 400)
+    await storage.touchSession(threadId, now()) // 让会话浮到列表顶部；无对应会话则 no-op
     try {
       const reply = await agent.run(threadId, message, context)
       return c.json(reply)
@@ -358,13 +394,19 @@ export function createApp(deps: AppDeps): Hono {
     if (!agent) return c.json(AGENT_UNSET, 400)
     const { threadId, message, context } = await c.req.json<{ threadId: string; message: string; context?: string }>()
     if (!threadId || !message) return c.json({ error: '缺 threadId 或 message' }, 400)
+    await storage.touchSession(threadId, now()) // 让会话浮到列表顶部；无对应会话则 no-op
     return streamSSE(c, async (stream) => {
+      // 客户端断开（用户点了停止）时中止模型生成，别继续烧 token
+      const ac = new AbortController()
+      stream.onAbort(() => ac.abort())
       try {
-        for await (const ev of agent.runStream(threadId, message, context)) {
+        for await (const ev of agent.runStream(threadId, message, context, ac.signal)) {
           await stream.writeSSE({ data: JSON.stringify(ev) })
         }
       } catch (e) {
-        await stream.writeSSE({ data: JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) }) })
+        if (!ac.signal.aborted) {
+          await stream.writeSSE({ data: JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) }) })
+        }
       }
     })
   })

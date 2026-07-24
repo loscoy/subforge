@@ -1,9 +1,9 @@
-import { createOpenAICompatible } from '@ai-sdk/openai-compatible'
 import { generateText, stepCountIs, streamText, tool, type LanguageModel, type ModelMessage } from 'ai'
 import { buildTools, type Tool, type ToolContext } from '../tools/registry.js'
+import { createAgentModel } from './model.js'
 import { MemoryManager } from './memory.js'
 import type { AgentEvent, AgentModelConfig, AgentReply, AgentRunner, AgentStep } from './runner.js'
-import { buildWebCapability, injectProviderTools, type WebCapability } from './webTools.js'
+import { buildWebCapability, type WebCapability } from './webTools.js'
 
 /**
  * 基于 Vercel AI SDK 的 AgentRunner 实现。
@@ -25,23 +25,7 @@ export class AiSdkAgentRunner implements AgentRunner {
   }
 
   private makeModel(): LanguageModel {
-    if (this.modelFactory) return this.modelFactory()
-    const cap = this.webCap
-    // 服务端联网工具（如 openrouter:web_search）不是标准 function tool，AI SDK 的工具
-    // 抽象表达不了，改在传输层注入：包一层 fetch，把声明追加进请求体 tools 数组。
-    const fetchWithWebTools: typeof fetch | undefined =
-      cap && cap.providerTools.length > 0
-        ? (input, init) => {
-            if (init && typeof init.body === 'string') init = { ...init, body: injectProviderTools(init.body, cap) }
-            return fetch(input, init)
-          }
-        : undefined
-    return createOpenAICompatible({
-      name: 'subforge',
-      baseURL: this.config.baseURL,
-      apiKey: this.config.apiKey,
-      ...(fetchWithWebTools ? { fetch: fetchWithWebTools } : {}),
-    })(this.config.model)
+    return this.modelFactory ? this.modelFactory() : createAgentModel(this.config, this.webCap)
   }
 
   private withWebHint(system: string): string {
@@ -68,7 +52,13 @@ export class AiSdkAgentRunner implements AgentRunner {
     })
 
     await this.memory.record(threadId, 'user', userMessage)
-    await this.memory.record(threadId, 'assistant', text, steps.map((s) => s.tool))
+    await this.memory.record(
+      threadId,
+      'assistant',
+      text,
+      steps.map((s) => s.tool),
+      { steps },
+    )
 
     return { text, steps }
   }
@@ -95,7 +85,7 @@ export class AiSdkAgentRunner implements AgentRunner {
               return result
             } catch (e) {
               const error = e instanceof Error ? e.message : String(e)
-              steps?.push({ tool: t.name, args, result: { error } })
+              steps?.push({ tool: t.name, args, error })
               return { error }
             }
           },
@@ -104,7 +94,12 @@ export class AiSdkAgentRunner implements AgentRunner {
     )
   }
 
-  async *runStream(threadId: string, userMessage: string, context?: string): AsyncIterable<AgentEvent> {
+  async *runStream(
+    threadId: string,
+    userMessage: string,
+    context?: string,
+    signal?: AbortSignal,
+  ): AsyncIterable<AgentEvent> {
     const model = this.makeModel()
     const { system: base, history } = await this.memory.loadContext(threadId)
     const system = this.withWebHint(context ? `${base}\n\n# 当前上下文\n${context}` : base)
@@ -119,31 +114,65 @@ export class AiSdkAgentRunner implements AgentRunner {
       messages,
       tools: this.buildTools(),
       stopWhen: stepCountIs(this.maxSteps),
+      abortSignal: signal,
     })
     let finalText = ''
+    let reasoning = ''
     const usedTools: string[] = []
+    // 按调用 id 索引，好让稍后到达的结果落回同一步（同名工具一轮可能被调用多次）
+    const steps = new Map<string, AgentStep>()
+    const stepOf = (id: string, tool: string) => {
+      let step = steps.get(id)
+      if (!step) {
+        step = { id, tool }
+        steps.set(id, step)
+      }
+      return step
+    }
     try {
       for await (const part of result.stream) {
         if (part.type === 'text-delta') {
           finalText += part.text
           yield { type: 'text', delta: part.text }
+        } else if (part.type === 'reasoning-delta') {
+          reasoning += part.text
+          yield { type: 'reasoning', delta: part.text }
         } else if (part.type === 'tool-call') {
           usedTools.push(part.toolName)
-          yield { type: 'tool-call', tool: part.toolName }
-        } else if (part.type === 'tool-result' || part.type === 'tool-error') {
-          // registry 工具的错误已在 execute 里转成 { error } 结果，tool-error 理论上
-          // 只会来自框架层异常；两者都作为「该工具已结束」上报，避免前端卡在运行中。
-          yield { type: 'tool-result', tool: part.toolName }
+          stepOf(part.toolCallId, part.toolName).args = part.input
+          yield { type: 'tool-call', id: part.toolCallId, tool: part.toolName, args: part.input }
+        } else if (part.type === 'tool-result') {
+          stepOf(part.toolCallId, part.toolName).result = part.output
+          yield { type: 'tool-result', id: part.toolCallId, tool: part.toolName, result: part.output }
+        } else if (part.type === 'tool-error') {
+          // registry 工具的错误已在 execute 里转成 { error } 结果，走上面的 tool-result；
+          // 这里只会是框架层异常（如入参 schema 校验失败）。同样上报「该工具已结束」，
+          // 否则前端会一直卡在运行中。
+          const error = part.error instanceof Error ? part.error.message : String(part.error)
+          stepOf(part.toolCallId, part.toolName).error = error
+          yield { type: 'tool-result', id: part.toolCallId, tool: part.toolName, error }
         } else if (part.type === 'error') {
           yield { type: 'error', error: part.error instanceof Error ? part.error.message : String(part.error) }
         }
       }
     } catch (e) {
-      yield { type: 'error', error: e instanceof Error ? e.message : String(e) }
+      // 主动中止（用户点停止）不是错误：streamText 会抛 AbortError，这里吞掉，
+      // 已经流出的文本 / 工具步骤照常在下面落库，前端也保留已显示的部分。
+      if (!signal?.aborted) {
+        yield { type: 'error', error: e instanceof Error ? e.message : String(e) }
+      }
     }
 
-    await this.memory.record(threadId, 'user', userMessage)
-    await this.memory.record(threadId, 'assistant', finalText, usedTools)
+    // 本轮彻底没产出（既无文本也无工具调用，通常是开局就出错）时一条都不写：
+    // 空的 assistant 消息会带进后续每一轮上下文，不少 provider 直接拒收空 content。
+    // 什么都不留，用户重发一次即可。
+    if (finalText || steps.size) {
+      await this.memory.record(threadId, 'user', userMessage)
+      await this.memory.record(threadId, 'assistant', finalText, usedTools, {
+        reasoning: reasoning || undefined,
+        steps: [...steps.values()],
+      })
+    }
     yield { type: 'done', text: finalText }
   }
 }

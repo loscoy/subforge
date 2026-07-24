@@ -1,5 +1,5 @@
 import { ActionIcon, Badge, Box, Card, Code, CopyButton, Group, SegmentedControl, Stack, Text, Tooltip } from '@mantine/core'
-import { useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { buildMcpExamples, resolveMcpEndpoint } from '../mcp'
 import { ICheck, ICopy, IPlug } from '../icons'
 import type { Meta } from '../types'
@@ -36,6 +36,20 @@ function CopyField({ value, label, copyLabel }: { value: string; label: string; 
 
 export function Mcp({ meta }: { meta: Meta['mcp'] }) {
   const [exampleMode, setExampleMode] = useState<'claude' | 'codex' | 'json'>('claude')
+  // 工具列表是限高滚动区。底部渐隐只在「确实还有内容」时出现，
+  // 免得滚到底还挂着一层假提示。窄屏该区不滚动，scrollHeight 与 clientHeight 相等，自然为 false。
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [hasMore, setHasMore] = useState(false)
+  const syncMore = useCallback(() => {
+    const el = scrollRef.current
+    if (el) setHasMore(el.scrollHeight - el.scrollTop - el.clientHeight > 8)
+  }, [])
+  useEffect(() => {
+    syncMore()
+    window.addEventListener('resize', syncMore)
+    return () => window.removeEventListener('resize', syncMore)
+  }, [syncMore, meta.tools.length])
+
   const endpoint = resolveMcpEndpoint(window.location.origin, meta.endpoint)
   const examples = buildMcpExamples(endpoint)
   const authorization = 'Authorization: Bearer <MCP_TOKEN>'
@@ -132,14 +146,14 @@ export function Mcp({ meta }: { meta: Meta['mcp'] }) {
       </Box>
 
       {/* 右：可用工具（滚动区，不撑开卡片） */}
-      <Box className="mcp-tools">
+      <Box className="mcp-tools" data-more={hasMore || undefined}>
         <Group justify="space-between" px={20} py={16} className="mcp-pane-head">
           <Text fw={600}>可用工具</Text>
           <Badge color="gray" variant="light">
             {meta.tools.length}
           </Badge>
         </Group>
-        <Box px={20} pt={4} pb={16} className="mcp-tools-scroll">
+        <Box px={20} pt={4} pb={16} className="mcp-tools-scroll" ref={scrollRef} onScroll={syncMore}>
           {meta.tools.map((tool) => (
             <Box key={tool.name} py={9}>
               <Text className="mono" fz={12.5} fw={600}>
@@ -151,6 +165,7 @@ export function Mcp({ meta }: { meta: Meta['mcp'] }) {
             </Box>
           ))}
         </Box>
+        <div className="mcp-tools-fade" aria-hidden="true" />
       </Box>
     </Card>
   )

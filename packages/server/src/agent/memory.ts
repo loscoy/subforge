@@ -1,4 +1,4 @@
-import type { Storage } from '../storage/index.js'
+import type { AgentTrace, Storage } from '../storage/index.js'
 import { newId, now } from '../util.js'
 
 export interface LoadedContext {
@@ -32,13 +32,21 @@ export class MemoryManager {
     return { system, history: msgs }
   }
 
-  async record(threadId: string, role: 'user' | 'assistant', content: string, tools?: string[]): Promise<void> {
+  async record(
+    threadId: string,
+    role: 'user' | 'assistant',
+    content: string,
+    tools?: string[],
+    trace?: AgentTrace,
+  ): Promise<void> {
+    const hasTrace = !!trace && (!!trace.reasoning || !!trace.steps?.length)
     await this.storage.addMessage({
       id: newId(),
       threadId,
       role,
       content,
       tools: tools && tools.length ? tools : undefined,
+      trace: hasTrace ? trace : undefined,
       createdAt: now(),
     })
   }

@@ -1,10 +1,12 @@
 import type {
   AgentEvent,
   AgentReply,
+  AgentTrace,
   Meta,
   PreviewResult,
   ProbeResult,
   Profile,
+  Session,
   Settings,
   SettingsPatch,
   Subscription,
@@ -68,22 +70,40 @@ export const api = {
   rollback: (id: string, versionId: string) =>
     req<Profile>(`/profiles/${id}/rollback`, { method: 'POST', body: JSON.stringify({ versionId }) }),
 
+  // 会话：profileId=null 取全局组，否则取该配置档的会话组
+  agentSessions: (profileId: string | null) =>
+    req<Session[]>(`/agent/sessions${profileId ? `?profileId=${encodeURIComponent(profileId)}` : ''}`),
+  createAgentSession: (profileId: string | null, firstMessage: string) =>
+    req<Session>('/agent/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ profileId: profileId ?? undefined, firstMessage }),
+    }),
+  renameAgentSession: (id: string, title: string) =>
+    req<Session>(`/agent/sessions/${id}`, { method: 'PATCH', body: JSON.stringify({ title }) }),
+  deleteAgentSession: (id: string) => req<{ ok: boolean }>(`/agent/sessions/${id}`, { method: 'DELETE' }),
+
   agentMessages: (threadId: string) =>
-    req<{ role: string; content: string; tools?: string[] }[]>(`/agent/messages/${threadId}`),
+    req<{ role: string; content: string; tools?: string[]; trace?: AgentTrace }[]>(`/agent/messages/${threadId}`),
   agentChat: (threadId: string, message: string, context?: string) =>
     req<AgentReply>('/agent/chat', { method: 'POST', body: JSON.stringify({ threadId, message, context }) }),
 
-  /** 流式对话：SSE，逐事件回调。返回一个可 await 的 Promise（结束时 resolve）。 */
+  /**
+   * 流式对话：SSE，逐事件回调。返回一个可 await 的 Promise（结束时 resolve）。
+   * 传入 signal 并 abort 时中止请求（用户点停止）——此时 fetch/read 抛 AbortError，
+   * 由调用方按「主动取消」处理，而非报错。
+   */
   async agentStream(
     threadId: string,
     message: string,
     context: string | undefined,
     on: (ev: AgentEvent) => void,
+    signal?: AbortSignal,
   ): Promise<void> {
     const res = await fetch('/api/agent/stream', {
       method: 'POST',
       headers: { 'content-type': 'application/json', ...(getToken() ? { 'X-Admin-Token': getToken() } : {}) },
       body: JSON.stringify({ threadId, message, context }),
+      signal,
     })
     if (!res.ok || !res.body) {
       const t = await res.text().catch(() => '')
