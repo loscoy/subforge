@@ -97,7 +97,7 @@ export class SqliteStorage implements Storage {
     this.db.prepare('DELETE FROM subscriptions WHERE id = ?').run(id)
   }
 
-  // ---- 转换档 ----
+  // ---- 配置 ----
   private rowToProfile(row: any): Profile {
     return {
       ...row,

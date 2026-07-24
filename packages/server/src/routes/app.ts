@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
-import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type ConversionProfile, type ScriptRunner } from '@subforge/core'
+import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type ScriptRunner } from '@subforge/core'
 import type { NodeChecker } from '../health.js'
 import type { AgentModelConfig, AgentRunner } from '../agent/index.js'
 import { fallbackTitle, generateSessionTitle } from '../agent/index.js'
@@ -23,6 +23,7 @@ import {
   buildProfileOutput,
   collectRawSubscriptions,
   ensureSubscriptionContent,
+  newDefaultProfile,
   previewScript,
   rollbackProfile,
   saveProfileWithVersion,
@@ -49,11 +50,6 @@ export interface RuntimeInfo {
   runtime: string
   storage: string
   sandbox: string
-}
-
-const EMPTY_PROFILE: ConversionProfile = {
-  groups: [{ name: '🚀 节点选择', type: 'select', includeAll: true, proxies: ['DIRECT'] }],
-  rules: ['MATCH,🚀 节点选择'],
 }
 
 export function createApp(deps: AppDeps): Hono {
@@ -232,7 +228,7 @@ export function createApp(deps: AppDeps): Hono {
     }
   })
 
-  // 转换档
+  // 配置
   api.get('/profiles', async (c) => c.json(await storage.listProfiles()))
   api.get('/profiles/:id', async (c) => {
     const p = await storage.getProfile(c.req.param('id'))
@@ -242,11 +238,11 @@ export function createApp(deps: AppDeps): Hono {
     const body = await c.req.json<Partial<Profile>>()
     const p: Profile = {
       id: newId(),
-      name: body.name || '未命名转换档',
+      name: body.name || '未命名配置',
       subscriptionIds: body.subscriptionIds || [],
       target: body.target || 'mihomo',
       script: body.script,
-      profile: body.profile || structuredClone(EMPTY_PROFILE),
+      profile: body.profile || newDefaultProfile(),
       token: newToken(),
       createdAt: now(),
       updatedAt: now(),
@@ -335,7 +331,7 @@ export function createApp(deps: AppDeps): Hono {
     if (!t) return c.json({ error: '模板不存在' }, 404)
     const { profileId } = await c.req.json<{ profileId: string }>()
     const p = await storage.getProfile(profileId)
-    if (!p) return c.json({ error: '转换档不存在' }, 404)
+    if (!p) return c.json({ error: '配置不存在' }, 404)
     await saveProfileWithVersion(storage, { ...p, profile: t.profile, script: t.script }, `套用模板「${t.name}」`)
     return c.json(await storage.getProfile(profileId))
   })

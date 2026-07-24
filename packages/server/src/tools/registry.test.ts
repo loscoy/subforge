@@ -109,4 +109,99 @@ describe('tool registry 集成', () => {
     await tool('update_working_memory').handler({ text: '用户偏好把香港节点单独分组' }, ctx)
     expect(await ctx.storage.getWorkingMemory()).toContain('香港')
   })
+
+  // ---- 新增：订阅 / 配置 CRUD + get_output ----
+
+  it('create_subscription + create_profile 全链路可校验', async () => {
+    const s: any = await tool('create_subscription').handler({ name: '新订阅', content: SUB_CONTENT }, ctx)
+    expect(s.id).toBeTruthy()
+    expect(await ctx.storage.getSubscription(s.id)).toBeTruthy()
+
+    const p: any = await tool('create_profile').handler({ name: '新档', subscriptionIds: [s.id] }, ctx)
+    expect(p.id).toBeTruthy()
+    expect(p.token).toBeTruthy()
+    // 默认建了一个可用的空配置（组 + MATCH 规则），能直接构建
+    const v: any = await tool('validate_profile').handler({ profileId: p.id }, ctx)
+    expect(v.ok).toBe(true)
+    expect(v.nodeCount).toBe(3)
+  })
+
+  it('create_subscription 缺 url 和 content 时报错', async () => {
+    await expect(tool('create_subscription').handler({ name: '空订阅' }, ctx)).rejects.toThrow()
+  })
+
+  it('create_profile 关联不存在的订阅时报错', async () => {
+    await expect(
+      tool('create_profile').handler({ name: 'x', subscriptionIds: ['not-exist'] }, ctx),
+    ).rejects.toThrow()
+  })
+
+  it('create_profile 非法 target 时报错', async () => {
+    await expect(tool('create_profile').handler({ name: 'x', target: 'bogus' }, ctx)).rejects.toThrow()
+  })
+
+  it('update_subscription 改名', async () => {
+    const subId = profile.subscriptionIds[0]!
+    const r: any = await tool('update_subscription').handler({ subscriptionId: subId, name: '改名订阅' }, ctx)
+    expect(r.ok).toBe(true)
+    expect((await ctx.storage.getSubscription(subId))!.name).toBe('改名订阅')
+  })
+
+  it('refresh_subscription 返回节点数与样本（手工 content）', async () => {
+    const subId = profile.subscriptionIds[0]!
+    const r: any = await tool('refresh_subscription').handler({ subscriptionId: subId }, ctx)
+    expect(r.ok).toBe(true)
+    expect(r.nodeCount).toBe(3)
+    expect(r.sample[0]).toBe('🇭🇰 HK 01')
+  })
+
+  it('refresh_subscription 拒绝私网 URL（SSRF）', async () => {
+    const s: any = await tool('create_subscription').handler({ name: 'evil', url: 'http://127.0.0.1/sub' }, ctx)
+    const r: any = await tool('refresh_subscription').handler({ subscriptionId: s.id }, ctx)
+    expect(r.ok).toBe(false)
+    expect(r.error).toBeTruthy()
+  })
+
+  it('update_profile 改元信息并产生版本快照', async () => {
+    const before: any = await tool('list_versions').handler({ profileId: profile.id }, ctx)
+    await tool('update_profile').handler({ profileId: profile.id, name: '改名了', target: 'sing-box' }, ctx)
+    const p = await ctx.storage.getProfile(profile.id)
+    expect(p!.name).toBe('改名了')
+    expect(p!.target).toBe('sing-box')
+    const after: any = await tool('list_versions').handler({ profileId: profile.id }, ctx)
+    expect(after.length).toBe(before.length + 1)
+  })
+
+  it('update_profile 非法 target 时报错', async () => {
+    await expect(
+      tool('update_profile').handler({ profileId: profile.id, target: 'bogus' }, ctx),
+    ).rejects.toThrow()
+  })
+
+  it('delete_subscription 被引用时拒绝，解除关联后可删', async () => {
+    const subId = profile.subscriptionIds[0]!
+    // 仍被 profile 引用 → 拒绝
+    await expect(tool('delete_subscription').handler({ subscriptionId: subId }, ctx)).rejects.toThrow()
+    expect(await ctx.storage.getSubscription(subId)).toBeTruthy()
+    // 解除关联后可删
+    await tool('update_profile').handler({ profileId: profile.id, subscriptionIds: [] }, ctx)
+    const r: any = await tool('delete_subscription').handler({ subscriptionId: subId }, ctx)
+    expect(r.ok).toBe(true)
+    expect(await ctx.storage.getSubscription(subId)).toBeUndefined()
+  })
+
+  it('delete_profile 后按 id 与 token 均查不到', async () => {
+    const token = profile.token
+    const r: any = await tool('delete_profile').handler({ profileId: profile.id }, ctx)
+    expect(r.ok).toBe(true)
+    expect(await ctx.storage.getProfile(profile.id)).toBeUndefined()
+    expect(await ctx.storage.getProfileByToken(token)).toBeUndefined()
+  })
+
+  it('get_output 返回完整配置全文', async () => {
+    const r: any = await tool('get_output').handler({ profileId: profile.id }, ctx)
+    expect(r.ok).toBe(true)
+    expect(typeof r.config).toBe('string')
+    expect(r.config.length).toBeGreaterThan(0)
+  })
 })

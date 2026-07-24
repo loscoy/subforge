@@ -111,7 +111,7 @@ function TraceRow({
 
 function ReasoningBlock({ text, streaming }: { text: string; streaming: boolean }) {
   const [open, setOpen] = useState(streaming)
-  // 出答案之前自动摊开跟看，出答案后自动收起；用户手动动过就不再自动改
+  // streaming=思考通道正在流：流式输出时自动展开跟看，流完自动收起；用户手动动过就不再自动改
   const touched = useRef(false)
   useEffect(() => {
     if (!touched.current) setOpen(streaming)
@@ -171,20 +171,23 @@ function Trace({
   steps,
   tools,
   busy,
+  reasoningStreaming = false,
 }: {
   reasoning?: string
   steps?: AgentStep[]
   tools?: string[]
   busy: boolean
+  /** 思考通道是否正在流——只驱动思考块的自动展开/收起（历史消息恒为 false → 默认收起）。 */
+  reasoningStreaming?: boolean
 }) {
   // 老消息只存了工具名，补成没有详情的步骤，展示上与新消息一致（只是点不开）
   const list: AgentStep[] = steps?.length ? steps : (tools ?? []).map((tool) => ({ tool }))
   if (!reasoning && !list.length) return null
   return (
     <div className="trace">
-      {/* 只要本轮还在跑就保持展开——有些推理模型把思考跟正文一起 / 更晚才吐，
-          原来「一见正文就收起」会让人根本看不到思考在流。收起交给本轮结束时。 */}
-      {reasoning && <ReasoningBlock text={reasoning} streaming={busy} />}
+      {/* 思考块：思考在流时自动展开，思考一停（正文/工具开始）自动收起；用户手动动过则不再自动改。
+          用 reasoningStreaming 而非整轮 busy——否则思考会一直摊开到本轮结束。 */}
+      {reasoning && <ReasoningBlock text={reasoning} streaming={reasoningStreaming} />}
       {list.map((step, i) => (
         <ToolBlock
           key={step.id ?? `${step.tool}-${i}`}
@@ -199,6 +202,9 @@ function Trace({
 interface LiveTurn {
   text: string
   reasoning: string
+  /** 当前是否正在流式吐「思考」通道（reasoning delta 到来时为 true，正文/工具开始时转 false）。
+   *  用它驱动思考块「在流时展开、流完收起」，而不是拿整轮 busy——否则思考会一直摊开到本轮结束。 */
+  reasoningActive: boolean
   steps: AgentStep[]
 }
 
@@ -236,7 +242,7 @@ export function AgentChatPanel({
   const [historyError, setHistoryError] = useState('')
   // 当前进行中的一轮（流式）
   const [live, setLive] = useState<LiveTurn | null>(null)
-  const turn = useRef<LiveTurn>({ text: '', reasoning: '', steps: [] })
+  const turn = useRef<LiveTurn>({ text: '', reasoning: '', reasoningActive: false, steps: [] })
   const logRef = useRef<HTMLDivElement>(null)
   // 是否「贴底」：仅当用户已在底部附近时才随新内容自动滚动，避免打断用户上翻查看历史
   const stick = useRef(true)
@@ -314,7 +320,7 @@ export function AgentChatPanel({
     onActivity?.(tid)
     stick.current = true // 发送后回到底部跟随本轮输出
     setItems((c) => [...c, { role: 'user', content: message }])
-    turn.current = { text: '', reasoning: '', steps: [] }
+    turn.current = { text: '', reasoning: '', reasoningActive: false, steps: [] }
     const flush = () => setLive({ ...turn.current, steps: [...turn.current.steps] })
     flush()
     const controller = new AbortController()
@@ -348,12 +354,15 @@ export function AgentChatPanel({
         (ev) => {
           if (ev.type === 'text') {
             turn.current.text += ev.delta
+            turn.current.reasoningActive = false // 正文开始 → 思考视为结束，收起
             flush()
           } else if (ev.type === 'reasoning') {
             turn.current.reasoning += ev.delta
+            turn.current.reasoningActive = true // 思考正在流 → 展开
             flush()
           } else if (ev.type === 'tool-call') {
             turn.current.steps.push({ id: ev.id, tool: ev.tool, args: ev.args })
+            turn.current.reasoningActive = false // 转去调工具 → 思考暂停，收起（若之后又吐思考会再展开）
             flush()
           } else if (ev.type === 'tool-result') {
             const step = turn.current.steps.find((s) => s.id === ev.id)
@@ -426,7 +435,12 @@ export function AgentChatPanel({
         ))}
         {live && (
           <div className="turn assistant">
-            <Trace reasoning={live.reasoning} steps={live.steps} busy={busy} />
+            <Trace
+              reasoning={live.reasoning}
+              steps={live.steps}
+              busy={busy}
+              reasoningStreaming={busy && live.reasoningActive}
+            />
             {(live.text || !live.steps.length) && (
               <div className="msg assistant">
                 {live.text ? <Markdown text={live.text} /> : <Text span c="dimmed">思考中…</Text>}

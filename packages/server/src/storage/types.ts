@@ -18,7 +18,7 @@ export interface Subscription {
 }
 
 /**
- * 一份「转换档」：把若干订阅按 profile（组/规则）+ script 转成目标格式，
+ * 一份「配置」：把若干订阅按 profile（组/规则）+ script 转成目标格式，
  * 通过 token 短链对外分享。
  */
 export interface Profile {
@@ -121,7 +121,7 @@ export interface Storage {
   upsertSubscription(sub: Subscription): Promise<void>
   deleteSubscription(id: string): Promise<void>
 
-  // 转换档
+  // 配置
   listProfiles(): Promise<Profile[]>
   getProfile(id: string): Promise<Profile | undefined>
   getProfileByToken(token: string): Promise<Profile | undefined>
