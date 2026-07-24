@@ -319,3 +319,54 @@ describe('运行时设置端点', () => {
     expect(view.diagnostics.renderers.length).toBeGreaterThan(0)
   })
 })
+
+describe('Agent 会话端点', () => {
+  // 不注入 makeAgent / 不配模型：建会话时起标题走「截断首句」降级路径，标题可预测。
+  const mkApp = () =>
+    createApp({ storage: new InMemoryStorage(), runner: new NodeVmRunner(), config: { ...getConfig(), allowNoAuth: true } })
+  const body = (b: unknown, method = 'POST') => ({ method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(b) })
+  const j = (res: Response) => res.json() as Promise<any>
+
+  it('建会话未配模型时用截断首句作标题；缺 firstMessage 报 400', async () => {
+    const app = mkApp()
+    const bad = await app.fetch(new Request('http://x/api/agent/sessions', body({ firstMessage: '   ' })))
+    expect(bad.status).toBe(400)
+
+    const res = await app.fetch(new Request('http://x/api/agent/sessions', body({ firstMessage: '帮我把香港节点单独分一组' })))
+    const s = await j(res)
+    expect(s.id).toBeTruthy()
+    expect(s.title).toBe('帮我把香港节点单独分一组')
+    expect(s.profileId).toBeUndefined()
+  })
+
+  it('会话按组隔离（全局 vs 配置档）', async () => {
+    const app = mkApp()
+    await app.fetch(new Request('http://x/api/agent/sessions', body({ firstMessage: '全局的事' })))
+    await app.fetch(new Request('http://x/api/agent/sessions', body({ profileId: 'p1', firstMessage: '档内的事' })))
+
+    const global = await j(await app.fetch(new Request('http://x/api/agent/sessions')))
+    expect(global.map((s: any) => s.title)).toEqual(['全局的事'])
+    const scoped = await j(await app.fetch(new Request('http://x/api/agent/sessions?profileId=p1')))
+    expect(scoped.map((s: any) => s.title)).toEqual(['档内的事'])
+  })
+
+  it('重命名与删除（删除连带清消息）', async () => {
+    const app = mkApp()
+    const s = await j(await app.fetch(new Request('http://x/api/agent/sessions', body({ firstMessage: '原始标题' }))))
+
+    // 空标题被拒
+    expect((await app.fetch(new Request(`http://x/api/agent/sessions/${s.id}`, body({ title: '  ' }, 'PATCH')))).status).toBe(400)
+    const renamed = await j(await app.fetch(new Request(`http://x/api/agent/sessions/${s.id}`, body({ title: '新标题' }, 'PATCH'))))
+    expect(renamed.title).toBe('新标题')
+
+    const del = await app.fetch(new Request(`http://x/api/agent/sessions/${s.id}`, { method: 'DELETE' }))
+    expect(del.status).toBe(200)
+    expect(await j(await app.fetch(new Request('http://x/api/agent/sessions')))).toEqual([])
+  })
+
+  it('重命名不存在的会话报 404', async () => {
+    const app = mkApp()
+    const res = await app.fetch(new Request('http://x/api/agent/sessions/nope', body({ title: 'x' }, 'PATCH')))
+    expect(res.status).toBe(404)
+  })
+})

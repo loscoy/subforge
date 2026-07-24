@@ -1,6 +1,6 @@
 import type { ConversionProfile } from '@subforge/core'
 import type { D1Database } from '@cloudflare/workers-types'
-import type { AgentMessage, Profile, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
 
 /**
  * Cloudflare D1 存储实现（异步）。
@@ -125,18 +125,64 @@ export class D1Storage implements Storage {
     await this.db.prepare('DELETE FROM templates WHERE id = ?').bind(id).run()
   }
 
+  // ---- 会话 ----
+  private rowToSession(r: any): Session {
+    return { id: r.id, title: r.title, profileId: r.profileId ?? undefined, createdAt: r.createdAt, updatedAt: r.updatedAt }
+  }
+  async listSessions(profileId: string | null): Promise<Session[]> {
+    const { results } =
+      profileId == null
+        ? await this.db.prepare('SELECT * FROM sessions WHERE profileId IS NULL ORDER BY updatedAt DESC').all()
+        : await this.db.prepare('SELECT * FROM sessions WHERE profileId = ? ORDER BY updatedAt DESC').bind(profileId).all()
+    return (results as any[]).map((r) => this.rowToSession(r))
+  }
+  async getSession(id: string): Promise<Session | undefined> {
+    const r = await this.db.prepare('SELECT * FROM sessions WHERE id = ?').bind(id).first()
+    return r ? this.rowToSession(r) : undefined
+  }
+  async upsertSession(s: Session): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO sessions (id,title,profileId,createdAt,updatedAt)
+         VALUES (?,?,?,?,?)
+         ON CONFLICT(id) DO UPDATE SET title=excluded.title,profileId=excluded.profileId,updatedAt=excluded.updatedAt`,
+      )
+      .bind(s.id, s.title, s.profileId ?? null, s.createdAt, s.updatedAt)
+      .run()
+  }
+  async touchSession(id: string, at: number): Promise<void> {
+    await this.db.prepare('UPDATE sessions SET updatedAt = ? WHERE id = ?').bind(at, id).run()
+  }
+  async deleteSession(id: string): Promise<void> {
+    // 先删消息再删会话；D1 无本地事务，两条顺序执行即可（删消息失败则会话仍在，可重试）
+    await this.db.prepare('DELETE FROM messages WHERE threadId = ?').bind(id).run()
+    await this.db.prepare('DELETE FROM sessions WHERE id = ?').bind(id).run()
+  }
+
   // ---- 记忆 ----
   async listMessages(threadId: string): Promise<AgentMessage[]> {
     const { results } = await this.db
       .prepare('SELECT * FROM messages WHERE threadId = ? ORDER BY createdAt')
       .bind(threadId)
       .all()
-    return (results as any[]).map((r) => ({ ...r, tools: r.tools ? JSON.parse(r.tools) : undefined })) as AgentMessage[]
+    return (results as any[]).map((r) => ({
+      ...r,
+      tools: r.tools ? JSON.parse(r.tools) : undefined,
+      trace: r.trace ? JSON.parse(r.trace) : undefined,
+    })) as AgentMessage[]
   }
   async addMessage(m: AgentMessage): Promise<void> {
     await this.db
-      .prepare('INSERT INTO messages (id,threadId,role,content,tools,createdAt) VALUES (?,?,?,?,?,?)')
-      .bind(m.id, m.threadId, m.role, m.content, m.tools ? JSON.stringify(m.tools) : null, m.createdAt)
+      .prepare('INSERT INTO messages (id,threadId,role,content,tools,trace,createdAt) VALUES (?,?,?,?,?,?,?)')
+      .bind(
+        m.id,
+        m.threadId,
+        m.role,
+        m.content,
+        m.tools ? JSON.stringify(m.tools) : null,
+        m.trace ? JSON.stringify(m.trace) : null,
+        m.createdAt,
+      )
       .run()
   }
   async clearThread(threadId: string): Promise<void> {

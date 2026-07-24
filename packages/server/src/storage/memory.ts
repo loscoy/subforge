@@ -1,4 +1,4 @@
-import type { AgentMessage, Profile, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
 
 /** 纯内存实现：用于测试，也可作无持久化的临时运行。方法为 async 以符合 Storage 接口。 */
 export class InMemoryStorage implements Storage {
@@ -6,6 +6,7 @@ export class InMemoryStorage implements Storage {
   private profiles = new Map<string, Profile>()
   private versions = new Map<string, Version>()
   private templates = new Map<string, StoredTemplate>()
+  private sessions = new Map<string, Session>()
   private messages: AgentMessage[] = []
   private workingMemory = ''
   private settings: string | undefined
@@ -62,6 +63,26 @@ export class InMemoryStorage implements Storage {
   }
   async deleteTemplate(id: string) {
     this.templates.delete(id)
+  }
+
+  async listSessions(profileId: string | null): Promise<Session[]> {
+    return [...this.sessions.values()]
+      .filter((s) => (profileId == null ? s.profileId == null : s.profileId === profileId))
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+  }
+  async getSession(id: string) {
+    return this.sessions.get(id)
+  }
+  async upsertSession(s: Session) {
+    this.sessions.set(s.id, { ...s })
+  }
+  async touchSession(id: string, at: number) {
+    const s = this.sessions.get(id)
+    if (s) s.updatedAt = at
+  }
+  async deleteSession(id: string) {
+    this.sessions.delete(id)
+    this.messages = this.messages.filter((m) => m.threadId !== id)
   }
 
   async listMessages(threadId: string): Promise<AgentMessage[]> {

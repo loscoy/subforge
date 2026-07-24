@@ -12,7 +12,7 @@ import type { Storage } from './types.js'
  */
 function makeFakeD1(): any {
   const db = new Database(':memory:')
-  for (const f of ['0001_init.sql', '0002_templates.sql', '0003_message_tools.sql']) {
+  for (const f of ['0001_init.sql', '0002_templates.sql', '0003_message_tools.sql', '0004_message_trace.sql', '0005_sessions.sql']) {
     db.exec(readFileSync(fileURLToPath(new URL(`../../migrations/${f}`, import.meta.url)), 'utf-8'))
   }
   return {
@@ -109,6 +109,52 @@ function runContract(name: string, make: () => Storage) {
       await s.setWorkingMemory('偏好香港分组')
       await s.setWorkingMemory('偏好香港分组+US')
       expect(await s.getWorkingMemory()).toBe('偏好香港分组+US')
+    })
+
+    it('消息 trace：思考与工具明细原样往返', async () => {
+      const s = make()
+      const trace = {
+        reasoning: '先看有哪些档，再决定改哪个',
+        steps: [
+          { id: 'call_1', tool: 'list_profiles', args: {}, result: { profiles: [{ id: 'p1' }] } },
+          { id: 'call_2', tool: 'write_script', args: { profileId: 'p1' }, error: '脚本语法错误' },
+        ],
+      }
+      await s.addMessage({ id: 'm1', threadId: 'tr', role: 'user', content: 'hi', createdAt: 1 })
+      await s.addMessage({ id: 'm2', threadId: 'tr', role: 'assistant', content: 'ok', tools: ['list_profiles'], trace, createdAt: 2 })
+      const msgs = await s.listMessages('tr')
+      // 无 trace 的旧消息读出来是 undefined，不是 null / '{}'
+      expect(msgs[0].trace).toBeUndefined()
+      expect(msgs[1].trace).toEqual(trace)
+    })
+
+    it('会话：按组隔离、按 updatedAt 倒序、touch 提前、删除连带清消息', async () => {
+      const s = make()
+      // 全局组两条 + 某配置档一条
+      await s.upsertSession({ id: 's1', title: '全局甲', createdAt: 1, updatedAt: 1 })
+      await s.upsertSession({ id: 's2', title: '全局乙', createdAt: 2, updatedAt: 2 })
+      await s.upsertSession({ id: 's3', title: '档内', profileId: 'p1', createdAt: 3, updatedAt: 3 })
+
+      // 全局组只看到 profileId 为空的两条，倒序（乙在前）
+      expect((await s.listSessions(null)).map((x) => x.id)).toEqual(['s2', 's1'])
+      // 某档组只看到该档的
+      expect((await s.listSessions('p1')).map((x) => x.id)).toEqual(['s3'])
+      // profileId 落库后读出来仍是原值（全局组为 undefined，不是 null）
+      expect((await s.getSession('s1'))?.profileId).toBeUndefined()
+      expect((await s.getSession('s3'))?.profileId).toBe('p1')
+
+      // touch 把 s1 顶到最前
+      await s.touchSession('s1', 99)
+      expect((await s.listSessions(null)).map((x) => x.id)).toEqual(['s1', 's2'])
+      // touch 不存在的会话是安全 no-op
+      await s.touchSession('nope', 100)
+
+      // 删除会话连带删掉它的消息
+      await s.addMessage({ id: 'sm1', threadId: 's1', role: 'user', content: 'hi', createdAt: 1 })
+      await s.deleteSession('s1')
+      expect(await s.getSession('s1')).toBeUndefined()
+      expect(await s.listMessages('s1')).toEqual([])
+      expect((await s.listSessions(null)).map((x) => x.id)).toEqual(['s2'])
     })
 
     it('运行时设置：未写入时为 undefined，写入可覆盖', async () => {

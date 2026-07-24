@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import type { ConversionProfile } from '@subforge/core'
-import type { AgentMessage, Profile, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
 
 /**
  * better-sqlite3 持久化实现。
@@ -33,7 +33,7 @@ export class SqliteStorage implements Storage {
       CREATE INDEX IF NOT EXISTS idx_versions_entity ON versions(entityId, createdAt DESC);
       CREATE TABLE IF NOT EXISTS messages (
         id TEXT PRIMARY KEY, threadId TEXT NOT NULL, role TEXT NOT NULL,
-        content TEXT NOT NULL, tools TEXT, createdAt INTEGER NOT NULL
+        content TEXT NOT NULL, tools TEXT, trace TEXT, createdAt INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_messages_thread ON messages(threadId, createdAt);
       CREATE TABLE IF NOT EXISTS kv (k TEXT PRIMARY KEY, v TEXT NOT NULL);
@@ -41,6 +41,11 @@ export class SqliteStorage implements Storage {
         id TEXT PRIMARY KEY, name TEXT NOT NULL, description TEXT, profile TEXT NOT NULL,
         script TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS sessions (
+        id TEXT PRIMARY KEY, title TEXT NOT NULL, profileId TEXT,
+        createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_sessions_profile ON sessions(profileId, updatedAt DESC);
     `)
     const cols = this.db.prepare('PRAGMA table_info(subscriptions)').all() as { name: string }[]
     if (!cols.some((c) => c.name === 'userInfo')) {
@@ -49,6 +54,21 @@ export class SqliteStorage implements Storage {
     const msgCols = this.db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]
     if (!msgCols.some((c) => c.name === 'tools')) {
       this.db.exec('ALTER TABLE messages ADD COLUMN tools TEXT')
+    }
+    if (!msgCols.some((c) => c.name === 'trace')) {
+      this.db.exec('ALTER TABLE messages ADD COLUMN trace TEXT')
+    }
+    // 回填：把 sessions 之前就存在的对话线程（global / profile:<id>）变成会话记录，
+    // 历史消息一条不动。只在 sessions 空且确有历史消息时跑一次；新库两者皆空，天然跳过。
+    const hasSession = this.db.prepare('SELECT 1 FROM sessions LIMIT 1').get()
+    if (!hasSession) {
+      this.db.exec(`
+        INSERT INTO sessions (id, title, profileId, createdAt, updatedAt)
+        SELECT threadId, '默认会话',
+               CASE WHEN threadId LIKE 'profile:%' THEN substr(threadId, 9) END,
+               MIN(createdAt), MAX(createdAt)
+        FROM messages GROUP BY threadId;
+      `)
     }
   }
 
@@ -155,15 +175,66 @@ export class SqliteStorage implements Storage {
     this.db.prepare('DELETE FROM templates WHERE id = ?').run(id)
   }
 
+  // ---- 会话 ----
+  private rowToSession(r: any): Session {
+    return { id: r.id, title: r.title, profileId: r.profileId ?? undefined, createdAt: r.createdAt, updatedAt: r.updatedAt }
+  }
+  async listSessions(profileId: string | null): Promise<Session[]> {
+    const rows = (
+      profileId == null
+        ? this.db.prepare('SELECT * FROM sessions WHERE profileId IS NULL ORDER BY updatedAt DESC').all()
+        : this.db.prepare('SELECT * FROM sessions WHERE profileId = ? ORDER BY updatedAt DESC').all(profileId)
+    ) as any[]
+    return rows.map((r) => this.rowToSession(r))
+  }
+  async getSession(id: string): Promise<Session | undefined> {
+    const r = this.db.prepare('SELECT * FROM sessions WHERE id = ?').get(id)
+    return r ? this.rowToSession(r) : undefined
+  }
+  async upsertSession(s: Session): Promise<void> {
+    this.db
+      .prepare(
+        `INSERT INTO sessions (id,title,profileId,createdAt,updatedAt)
+         VALUES (@id,@title,@profileId,@createdAt,@updatedAt)
+         ON CONFLICT(id) DO UPDATE SET title=@title,profileId=@profileId,updatedAt=@updatedAt`,
+      )
+      .run({ ...s, profileId: s.profileId ?? null })
+  }
+  async touchSession(id: string, at: number): Promise<void> {
+    this.db.prepare('UPDATE sessions SET updatedAt = ? WHERE id = ?').run(at, id)
+  }
+  async deleteSession(id: string): Promise<void> {
+    // 会话与其消息一并删除，避免留下无归属的孤儿消息
+    const tx = this.db.transaction((sid: string) => {
+      this.db.prepare('DELETE FROM messages WHERE threadId = ?').run(sid)
+      this.db.prepare('DELETE FROM sessions WHERE id = ?').run(sid)
+    })
+    tx(id)
+  }
+
   // ---- 记忆 ----
   async listMessages(threadId: string): Promise<AgentMessage[]> {
     const rows = this.db.prepare('SELECT * FROM messages WHERE threadId = ? ORDER BY createdAt').all(threadId) as any[]
-    return rows.map((r) => ({ ...r, tools: r.tools ? JSON.parse(r.tools) : undefined }))
+    return rows.map((r) => ({
+      ...r,
+      tools: r.tools ? JSON.parse(r.tools) : undefined,
+      trace: r.trace ? JSON.parse(r.trace) : undefined,
+    }))
   }
   async addMessage(m: AgentMessage): Promise<void> {
     this.db
-      .prepare('INSERT INTO messages (id,threadId,role,content,tools,createdAt) VALUES (@id,@threadId,@role,@content,@tools,@createdAt)')
-      .run({ id: m.id, threadId: m.threadId, role: m.role, content: m.content, tools: m.tools ? JSON.stringify(m.tools) : null, createdAt: m.createdAt })
+      .prepare(
+        'INSERT INTO messages (id,threadId,role,content,tools,trace,createdAt) VALUES (@id,@threadId,@role,@content,@tools,@trace,@createdAt)',
+      )
+      .run({
+        id: m.id,
+        threadId: m.threadId,
+        role: m.role,
+        content: m.content,
+        tools: m.tools ? JSON.stringify(m.tools) : null,
+        trace: m.trace ? JSON.stringify(m.trace) : null,
+        createdAt: m.createdAt,
+      })
   }
   async clearThread(threadId: string): Promise<void> {
     this.db.prepare('DELETE FROM messages WHERE threadId = ?').run(threadId)

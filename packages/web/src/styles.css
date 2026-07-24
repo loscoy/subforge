@@ -194,11 +194,44 @@ body {
   flex-direction: column;
   position: sticky;
   top: 54px;
-  height: calc(100dvh - 54px);
+  /* 与 .app-shell 一致用 svh：dvh 在手机工具栏收起时会变大，把页面撑出一段空白 */
+  height: calc(100svh - 54px);
   box-sizing: border-box;
 }
 .agent-drawer-head {
   border-bottom: 1px solid var(--sf-border-subtle);
+}
+/* 会话切换触发器：把原来的静态「Agent」标题换成可点的当前会话名 + 箭头 */
+.agent-session-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  max-width: 100%;
+  padding: 3px 7px;
+  margin: -3px -7px;
+  border-radius: 7px;
+  color: var(--mantine-color-text);
+  transition: background-color 160ms ease;
+}
+.agent-session-trigger:hover {
+  background: var(--sf-surface-subtle);
+}
+.agent-session-trigger[aria-expanded='true'] .agent-session-caret,
+.agent-session-trigger[data-expanded] .agent-session-caret {
+  transform: rotate(90deg);
+}
+.agent-session-caret {
+  transition: transform 160ms ease;
+}
+/* 会话多时列表限高滚动，别把菜单顶破视口 */
+.agent-session-list {
+  max-height: 300px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+.agent-session-item[data-active] {
+  background: var(--mantine-color-violet-light);
+  color: var(--mantine-color-violet-light-color);
 }
 
 /* 左边缘拖拽把手：命中区 11px（够手指也够鼠标），视觉只有 3px 一条线 */
@@ -534,6 +567,9 @@ body {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
   padding: 0;
+  /* 右栏是内部滚动区，高度只能由行高给。不定下限的话，行高完全由左栏决定，
+     十几个工具会被压成看不出还能滚的六七行（页面下方却大片留白）。 */
+  min-height: min(620px, 72vh);
 }
 .mcp-conn {
   border-right: 1px solid var(--sf-border-subtle);
@@ -587,12 +623,44 @@ body {
   display: flex;
   flex-direction: column;
   min-height: 0;
+  /* 底部渐隐要贴着这一栏定位 */
+  position: relative;
 }
 .mcp-tools-scroll {
   flex: 1 1 0;
   height: 0;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  /* macOS 的悬浮滚动条平时不可见，列表看着就像被截断了。这里让滚动条常驻，
+     配合下面的渐隐，一眼能看出「还有」。 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--sf-border-interactive) transparent;
+}
+.mcp-tools-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+.mcp-tools-scroll::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  background: var(--sf-border-interactive);
+}
+.mcp-tools-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+/* 底部渐隐：滚到底时由 JS 摘掉 data-more */
+.mcp-tools-fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 42px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 160ms ease;
+  background: linear-gradient(to bottom, transparent, var(--sf-surface));
+}
+.mcp-tools[data-more] .mcp-tools-fade {
+  opacity: 1;
 }
 .mcp-copy-field {
   position: relative;
@@ -624,6 +692,10 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* 必须自成定位上下文：否则内部任何绝对定位元素都会把包含块一路找到
+     .agent-drawer（sticky 也算定位元素），逃过这里的 overflow 裁剪，
+     按静态位置停在滚动区深处，把整页文档高度撑到上万 px（底下全是空白）。 */
+  position: relative;
   /* 滚到顶/底时不把滚动传给背后的页面（手机全屏态尤其明显） */
   overscroll-behavior: contain;
   padding: 6px 2px;
@@ -665,31 +737,104 @@ body {
 [data-mantine-color-scheme='dark'] .msg.assistant {
   background: var(--sf-surface-subtle);
 }
-.tool-chip {
-  display: inline-flex;
-  align-items: center;
+
+/* ---------- 一轮里的中间过程：思考 + 工具调用，均可展开看内容 ---------- */
+.trace {
+  align-self: stretch;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
   gap: 4px;
-  font-family: 'JetBrains Mono', monospace;
-  font-size: 11px;
-  color: var(--mantine-color-violet-6);
-  background: var(--mantine-color-violet-0);
-  border-radius: 7px;
-  padding: 2px 8px;
 }
-.visually-hidden {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  padding: 0;
-  margin: -1px;
+.trace-item {
+  border: 1px solid var(--sf-border-subtle);
+  border-radius: 8px;
+  background: var(--sf-surface);
   overflow: hidden;
-  clip: rect(0, 0, 0, 0);
-  white-space: nowrap;
-  border: 0;
 }
-[data-mantine-color-scheme='dark'] .tool-chip {
-  color: #c9b6ff;
-  background: rgba(139, 92, 246, 0.13);
+.trace-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  width: 100%;
+  padding: 5px 9px;
+  font-size: 11.5px;
+  line-height: 1.6;
+  text-align: left;
+  color: var(--mantine-color-dimmed);
+  transition: background-color 160ms ease;
+}
+.trace-head:not(.is-static):hover {
+  background: var(--sf-surface-subtle);
+}
+.trace-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--mantine-color-violet-6);
+}
+.trace-item[data-tone='error'] .trace-icon {
+  color: var(--sf-amber);
+}
+.trace-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--mantine-color-text);
+}
+.trace-hint,
+.trace-chevron {
+  flex-shrink: 0;
+}
+.trace-item[data-tone='error'] .trace-hint {
+  color: var(--sf-amber);
+}
+.trace-chevron {
+  display: inline-flex;
+  transition: transform 160ms ease;
+}
+.trace-chevron[data-open] {
+  transform: rotate(90deg);
+}
+.trace-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 9px 9px;
+}
+.trace-detail-label {
+  font-size: 10.5px;
+  color: var(--mantine-color-dimmed);
+  margin-bottom: 3px;
+}
+.trace-detail-body {
+  margin: 0;
+  padding: 7px 9px;
+  border-radius: 6px;
+  background: var(--sf-surface-subtle);
+  font-size: 11.5px;
+  line-height: 1.6;
+  /* 单段结果可能有几百行，给它自己的滚动区，别把整条消息撑成一屏 */
+  max-height: 260px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.trace-detail-body.is-error {
+  color: var(--mantine-color-red-7);
+}
+[data-mantine-color-scheme='dark'] .trace-detail-body.is-error {
+  color: var(--mantine-color-red-4);
+}
+/* 思考是自然语言，用正文字体、去掉底色，读起来才像段落而不像日志 */
+.trace-detail-body.is-reasoning {
+  font-family: inherit;
+  font-size: 12px;
+  padding: 0;
+  background: transparent;
+  color: var(--mantine-color-dimmed);
 }
 .caret {
   display: inline-block;
@@ -727,16 +872,21 @@ body {
   }
   .mcp-card {
     grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
   }
   .mcp-conn {
     border-right: none;
     border-bottom: 1px solid var(--sf-border-subtle);
   }
-  /* 单列布局下没有「左栏高度」可对齐，工具列表直接展开、随页面滚动 */
+  /* 单列布局下没有「左栏高度」可对齐，工具列表直接展开、随页面滚动，
+     既不内部滚动，也就不需要渐隐提示 */
   .mcp-tools-scroll {
     flex: none;
     height: auto;
     overflow-y: visible;
+  }
+  .mcp-tools-fade {
+    display: none;
   }
 }
 @media (max-width: 48em) {
