@@ -25,7 +25,7 @@ describe('HTTP app', () => {
     expect(res.status).toBe(200)
   })
 
-  it('全流程：建订阅 → 建转换档 → /sub/:token 输出可用配置', async () => {
+  it('全流程：建订阅 → 建配置 → /sub/:token 输出可用配置', async () => {
     const subRes = await app.fetch(
       new Request('http://x/api/subscriptions', {
         method: 'POST',

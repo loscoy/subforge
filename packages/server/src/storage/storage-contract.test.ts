@@ -56,7 +56,7 @@ function runContract(name: string, make: () => Storage) {
       expect(await s.getSubscription('a')).toBeUndefined()
     })
 
-    it('转换档 + token 查询', async () => {
+    it('配置 + token 查询', async () => {
       const s = make()
       await s.upsertProfile({
         id: 'p', name: 'P', subscriptionIds: ['a', 'b'], target: 'mihomo', script: 'return nodes',
@@ -96,7 +96,7 @@ function runContract(name: string, make: () => Storage) {
       expect(await s.getTemplate('t1')).toBeUndefined()
     })
 
-    it('消息与工作记忆', async () => {
+    it('消息与长期记忆', async () => {
       const s = make()
       await s.addMessage({ id: 'm1', threadId: 't', role: 'user', content: 'hi', createdAt: 1 })
       await s.addMessage({ id: 'm2', threadId: 't', role: 'assistant', content: 'yo', tools: ['run_preview', 'write_config'], createdAt: 2 })
@@ -159,13 +159,13 @@ function runContract(name: string, make: () => Storage) {
 
     it('运行时设置：未写入时为 undefined，写入可覆盖', async () => {
       const s = make()
-      // 与工作记忆区分：空设置是 undefined 而非 ''，settings.ts 据此走默认值
+      // 与长期记忆区分：空设置是 undefined 而非 ''，settings.ts 据此走默认值
       expect(await s.getSettings()).toBeUndefined()
       await s.setSettings('{"agent":{"model":"a"}}')
       expect(await s.getSettings()).toBe('{"agent":{"model":"a"}}')
       await s.setSettings('{"agent":{"model":"b"}}')
       expect(await s.getSettings()).toBe('{"agent":{"model":"b"}}')
-      // 与工作记忆共用 kv 表但互不干扰
+      // 与长期记忆共用 kv 表但互不干扰
       await s.setWorkingMemory('mem')
       expect(await s.getSettings()).toBe('{"agent":{"model":"b"}}')
     })

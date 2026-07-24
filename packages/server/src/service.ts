@@ -3,6 +3,7 @@ import {
   nodeToMihomo,
   parseSubscription,
   runPipeline,
+  type ConversionProfile,
   type PipelineOutput,
   type ProxyNode,
   type ScriptRunner,
@@ -13,6 +14,18 @@ import { parseUserInfo, type UserInfo } from './userinfo.js'
 import { newId, now } from './util.js'
 
 const DEFAULT_MAX_AGE_MS = 60 * 60 * 1000 // 1h 缓存
+
+/**
+ * 新建配置时的默认「空白骨架」：一个可直接构建的最小节点选择组 + 兜底规则。
+ * HTTP 建档与 agent 的 create_profile 共用同一份，避免两处漂移。每次返回全新对象，
+ * 调用方可直接改而不影响其它档。
+ */
+export function newDefaultProfile(): ConversionProfile {
+  return {
+    groups: [{ name: '🚀 节点选择', type: 'select', includeAll: true, proxies: ['DIRECT'] }],
+    rules: ['MATCH,🚀 节点选择'],
+  }
+}
 
 /** 抓取订阅内容（带 UA），返回正文与解析出的流量信息。失败抛错。 */
 export async function fetchSubscriptionContent(url: string): Promise<{ content: string; userInfo?: UserInfo }> {
@@ -53,7 +66,7 @@ export async function ensureSubscriptionContent(
   return content
 }
 
-/** 取一个转换档关联的所有订阅原文。 */
+/** 取一个配置关联的所有订阅原文。 */
 export async function collectRawSubscriptions(
   storage: Storage,
   profile: Profile,
@@ -70,7 +83,7 @@ export async function collectRawSubscriptions(
   return raws.filter((r): r is string => r !== null)
 }
 
-/** 端到端构建一个转换档的输出配置。 */
+/** 端到端构建一个配置的最终输出。 */
 export async function buildProfileOutput(
   storage: Storage,
   runner: ScriptRunner,
@@ -96,7 +109,7 @@ export interface PreviewResult {
 }
 
 /**
- * Dry-run 预览：对转换档的节点跑一段脚本，返回处理前后的节点与日志。
+ * Dry-run 预览：对配置的节点跑一段脚本，返回处理前后的节点与日志。
  * 供编辑器实时预览 & Agent 的 run_preview 工具使用。
  */
 export async function previewScript(
@@ -134,7 +147,7 @@ export async function previewScript(
   }
 }
 
-/** 写入转换档前先快照当前版本，保证可回滚。 */
+/** 写入配置前先快照当前版本，保证可回滚。 */
 export async function saveProfileWithVersion(storage: Storage, next: Profile, note?: string): Promise<void> {
   const prev = await storage.getProfile(next.id)
   if (prev) {
@@ -154,7 +167,7 @@ export async function saveProfileWithVersion(storage: Storage, next: Profile, no
 /** 回滚到某个版本快照。 */
 export async function rollbackProfile(storage: Storage, profileId: string, versionId: string): Promise<Profile> {
   const cur = await storage.getProfile(profileId)
-  if (!cur) throw new Error('转换档不存在')
+  if (!cur) throw new Error('配置不存在')
   const ver = await storage.getVersion(versionId)
   if (!ver || ver.entityId !== profileId) throw new Error('版本不存在')
   const snap = JSON.parse(ver.snapshot) as { script?: string | null; profile?: Profile['profile']; target?: string; name?: string }

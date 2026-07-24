@@ -28,7 +28,7 @@ export type AgentEvent =
 export interface AgentRunner {
   /**
    * 在某会话线程内处理一条用户消息，返回最终回复与中间工具步骤。
-   * @param context 可选的即时上下文（如「当前正在编辑的转换档 id/name」），并入系统提示。
+   * @param context 可选的即时上下文（如「当前正在编辑的配置 id/name」），并入系统提示。
    */
   run(threadId: string, userMessage: string, context?: string): Promise<AgentReply>
 

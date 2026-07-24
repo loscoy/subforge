@@ -24,8 +24,9 @@ export class AiSdkAgentRunner implements AgentRunner {
     this.webCap = config.webTools ? buildWebCapability(config.webTools) : undefined
   }
 
-  private makeModel(): LanguageModel {
-    return this.modelFactory ? this.modelFactory() : createAgentModel(this.config, this.webCap)
+  /** sessionId=threadId：经 OpenRouter 转发时下发为 session_id，做粘性路由提升缓存命中。 */
+  private makeModel(sessionId: string): LanguageModel {
+    return this.modelFactory ? this.modelFactory() : createAgentModel(this.config, this.webCap, sessionId)
   }
 
   private withWebHint(system: string): string {
@@ -33,7 +34,7 @@ export class AiSdkAgentRunner implements AgentRunner {
   }
 
   async run(threadId: string, userMessage: string, context?: string): Promise<AgentReply> {
-    const model = this.makeModel()
+    const model = this.makeModel(threadId)
 
     const { system: baseSystem, history } = await this.memory.loadContext(threadId)
     const system = this.withWebHint(context ? `${baseSystem}\n\n# 当前上下文\n${context}` : baseSystem)
@@ -100,7 +101,7 @@ export class AiSdkAgentRunner implements AgentRunner {
     context?: string,
     signal?: AbortSignal,
   ): AsyncIterable<AgentEvent> {
-    const model = this.makeModel()
+    const model = this.makeModel(threadId)
     const { system: base, history } = await this.memory.loadContext(threadId)
     const system = this.withWebHint(context ? `${base}\n\n# 当前上下文\n${context}` : base)
     const messages: ModelMessage[] = [

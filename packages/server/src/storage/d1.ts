@@ -40,7 +40,7 @@ export class D1Storage implements Storage {
     await this.db.prepare('DELETE FROM subscriptions WHERE id = ?').bind(id).run()
   }
 
-  // ---- 转换档 ----
+  // ---- 配置 ----
   private rowToProfile(row: any): Profile {
     return {
       ...row,
