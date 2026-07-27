@@ -16,6 +16,7 @@ import {
   ScrollArea,
   Skeleton,
   Stack,
+  Switch,
   Text,
   Textarea,
   TextInput,
@@ -28,7 +29,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { api } from '../api'
 import { AGENT_CHANGED_EVENT } from '../App'
-import { IAlert, ICheck, ICopy, IDots, IHistory, ILayers, IPlus, ISave, ISearch, ITrash } from '../icons'
+import { IAlert, ICheck, IChevron, ICopy, IDots, IHistory, ILayers, IPlus, ISave, ISearch, ITrash } from '../icons'
 import { builtinTemplates, serverToUI, type UITemplate } from '../templates'
 import type { ConversionProfile, NodeOp, Profile, ProxyGroupDef, Subscription } from '../types'
 import { DetailSkeleton, ListSkeleton, LoadError } from './AsyncState'
@@ -198,14 +199,20 @@ export function Profiles({
             <LoadError message={detailError} onRetry={() => selectedId && void selectProfile(selectedId)} />
           </Box>
         ) : !sel ? (
-          <Stack align="center" gap={8} py={64} c="dimmed">
-            <ILayers size={34} />
-            <Text fw={600} c="var(--mantine-color-text)">
+          /* 空态垂直居中并给出下一步动作，而不是把一行小字丢在一片空白的顶部 */
+          <Stack align="center" justify="center" gap={10} c="dimmed" className="profiles-empty">
+            <Box className="profiles-empty-icon">
+              <ILayers size={26} />
+            </Box>
+            <Text fw={600} fz={15} c="var(--mantine-color-text)">
               选择或新建一个配置
             </Text>
-            <Text fz="sm" ta="center">
+            <Text fz="sm" ta="center" maw={330}>
               配置决定订阅怎么转：套模板、勾选分流、或写脚本。
             </Text>
+            <Button mt={6} leftSection={<IPlus size={15} />} loading={creating} onClick={() => void create()}>
+              新建配置
+            </Button>
           </Stack>
         ) : (
           <ProfileDetail
@@ -314,6 +321,11 @@ function ProfileDetail({
   const [templates, setTemplates] = useState<UITemplate[]>(builtinTemplates())
   const [output, setOutput] = useState<string | null>(null)
   const [outputOpen, outputCtl] = useDisclosure(false)
+  // 内联输出预览（与上面的「查看输出」弹窗各自独立，互不影响）
+  const [previewOpen, setPreviewOpen] = useState(true)
+  const [preview, setPreview] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const [previewError, setPreviewError] = useState('')
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(profile.updatedAt)
   const [outputLoading, setOutputLoading] = useState(false)
@@ -439,6 +451,35 @@ function ProfileDetail({
     setScript(t.script || '')
     setPendingTemplate(null)
   }
+
+  /** 拉一次内联预览。失败不弹 toast——就地显示即可，这里是常驻面板不是用户主动操作。 */
+  const loadPreview = async () => {
+    if (previewLoading) return
+    setPreviewLoading(true)
+    setPreviewError('')
+    try {
+      const o = await api.output(profile.id)
+      if (o.ok) setPreview(o.config || '')
+      else {
+        setPreview(null)
+        setPreviewError(`暂时无法生成：${o.error}`)
+      }
+    } catch (e) {
+      setPreview(null)
+      setPreviewError(String(e))
+    } finally {
+      setPreviewLoading(false)
+    }
+  }
+
+  // 切换配置时清掉上一份预览，展开状态下自动拉新的
+  useEffect(() => {
+    setPreview(null)
+    setPreviewError('')
+    if (!previewOpen) return
+    void loadPreview()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [profile.id, previewOpen])
 
   const viewOutput = async () => {
     if (outputLoading) return
@@ -611,8 +652,33 @@ function ProfileDetail({
     <Box className="profile-detail-body">
       {/* 头部：名称 / 输出格式 / 分享链接 / 更多 */}
       <Box px={20} pt={16} pb={6}>
+        {/* 名称即标题：无框大字，hover/聚焦才显出输入框，是这个配置的身份而不是又一个表单项 */}
+        <Group gap={8} wrap="nowrap" align="center" mb={14}>
+          <TextInput
+            className="profile-title-input"
+            value={name}
+            onChange={(e) => setName(e.currentTarget.value)}
+            placeholder="未命名配置"
+            aria-label="配置名称"
+            style={{ flex: 1, minWidth: 0 }}
+          />
+          <Menu position="bottom-end" width={160}>
+            <Menu.Target>
+              <ActionIcon variant="subtle" size={34} radius={7} c="dimmed" aria-label="更多操作">
+                <IDots size={16} />
+              </ActionIcon>
+            </Menu.Target>
+            <Menu.Dropdown>
+              <Menu.Item leftSection={<IHistory size={14} />} onClick={() => void loadVersions()}>
+                版本历史
+              </Menu.Item>
+              <Menu.Item color="red" leftSection={<ITrash size={14} />} onClick={() => setDeleteOpen(true)}>
+                删除配置
+              </Menu.Item>
+            </Menu.Dropdown>
+          </Menu>
+        </Group>
         <Box className="profile-head-grid">
-          <TextInput label="名称" value={name} onChange={(e) => setName(e.currentTarget.value)} />
           <NativeSelect label="输出格式" value={target} onChange={(e) => setTarget(e.currentTarget.value)} data={renderers} />
           <Box>
             <Text component="label" fz={13} fw={500} c="dimmed" display="block" mb={5}>
@@ -637,21 +703,6 @@ function ProfileDetail({
               </CopyButton>
             </Group>
           </Box>
-          <Menu position="bottom-end" width={160}>
-            <Menu.Target>
-              <ActionIcon variant="default" size={36} radius={7} c="dimmed" aria-label="更多操作" style={{ alignSelf: 'end' }}>
-                <IDots size={16} />
-              </ActionIcon>
-            </Menu.Target>
-            <Menu.Dropdown>
-              <Menu.Item leftSection={<IHistory size={14} />} onClick={() => void loadVersions()}>
-                版本历史
-              </Menu.Item>
-              <Menu.Item color="red" leftSection={<ITrash size={14} />} onClick={() => setDeleteOpen(true)}>
-                删除配置
-              </Menu.Item>
-            </Menu.Dropdown>
-          </Menu>
         </Box>
 
         <Group gap={8} mt={14} wrap="wrap">
@@ -703,13 +754,17 @@ function ProfileDetail({
         )}
       </Group>
 
+      {/* 工作区：宽屏下「表单 | 输出预览」左右分栏，窄屏回落成上下堆叠。
+          脚本页不分栏——Monaco 需要整个宽度。 */}
+      <Box className="profile-workspace" data-split={section !== 'script' && previewOpen ? '' : undefined}>
       {/* 节点处理 */}
       {section === 'nodes' && (
-        <Box px={20} py={16}>
-          <Group mb={14} gap={20}>
-            <Checkbox label="去重" checked={opForm.dedupe} onChange={(e) => setOp({ dedupe: e.currentTarget.checked })} />
-            <Checkbox label="地区打标签" checked={opForm.tagRegions} onChange={(e) => setOp({ tagRegions: e.currentTarget.checked })} />
-            <Checkbox label="按名称排序" checked={opForm.sortByName} onChange={(e) => setOp({ sortByName: e.currentTarget.checked })} />
+        <Box px={20} py={16} className="section-pane">
+          {/* 开关式功能项：这三个是「启用/关闭」而非「多选」，Switch 才是对的语义与观感 */}
+          <Group mb={16} gap={22}>
+            <Switch label="去重" checked={opForm.dedupe} onChange={(e) => setOp({ dedupe: e.currentTarget.checked })} />
+            <Switch label="地区打标签" checked={opForm.tagRegions} onChange={(e) => setOp({ tagRegions: e.currentTarget.checked })} />
+            <Switch label="按名称排序" checked={opForm.sortByName} onChange={(e) => setOp({ sortByName: e.currentTarget.checked })} />
           </Group>
           <Box className="form-grid form-grid-2">
             <TextInput label="剔除节点（正则）" placeholder="过期|剩余|官网|流量" value={opForm.dropPattern} onChange={(e) => setOp({ dropPattern: e.currentTarget.value })} />
@@ -727,7 +782,7 @@ function ProfileDetail({
 
       {/* 代理组 */}
       {section === 'groups' && (
-        <Box px={20} py={16}>
+        <Box px={20} py={16} className="section-pane">
           <Group justify="space-between" gap={12} mb={12} wrap="wrap">
             <Checkbox
               label="地区自动分组（按节点生成 HK/US/JP… 测速组）"
@@ -791,7 +846,7 @@ function ProfileDetail({
 
       {/* 分流规则 */}
       {section === 'rules' && (
-        <Box px={20} py={16}>
+        <Box px={20} py={16} className="section-pane">
           <Text fz={13} fw={500} c="dimmed" mb={8}>
             分流预设（勾选自动加分组 + 规则）
           </Text>
@@ -822,7 +877,7 @@ function ProfileDetail({
 
       {/* 脚本 */}
       {section === 'script' && (
-        <Box px={20} py={16} className="script-pane">
+        <Box px={20} py={16} className="script-pane section-pane">
           <Text c="dimmed" fz={13} mb={12}>
             留空则用表单；写代码可完全自定义（<span className="mono">return nodes</span> 变换，或{' '}
             <span className="mono">function main(config)</span> 覆写）。
@@ -837,6 +892,73 @@ function ProfileDetail({
           </Suspense>
         </Box>
       )}
+
+      {/* 内联输出预览：占据表单下方原本大片空白的区域，让「这个配置最终产出什么」始终可见。
+          脚本页不挂——那里 Monaco 自己会撑满，再叠一层只会互相挤。 */}
+      {section !== 'script' && (
+        <Box className="output-dock" data-open={previewOpen || undefined}>
+          <UnstyledButton
+            className="output-dock-head"
+            onClick={() => setPreviewOpen((v) => !v)}
+            aria-expanded={previewOpen}
+            aria-label={`输出预览，${previewOpen ? '点击收起' : '点击展开'}`}
+          >
+            <span className="output-dock-caret" data-open={previewOpen || undefined}>
+              <IChevron size={12} />
+            </span>
+            <Text fz={12.5} fw={600}>
+              输出预览
+            </Text>
+            <Badge variant="light" color="gray" size="xs">
+              {target}
+            </Badge>
+            <span style={{ flex: 1 }} />
+            {previewOpen && (
+              <Text
+                component="span"
+                fz={12}
+                c="dimmed"
+                className="output-dock-refresh"
+                role="button"
+                tabIndex={0}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  void loadPreview()
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    void loadPreview()
+                  }
+                }}
+              >
+                {previewLoading ? '生成中…' : '重新生成'}
+              </Text>
+            )}
+          </UnstyledButton>
+          {previewOpen && (
+            <Box className="output-dock-body">
+              {previewLoading && preview == null ? (
+                <Text c="dimmed" fz={12.5} p={14}>
+                  正在生成…
+                </Text>
+              ) : previewError ? (
+                <Text c="dimmed" fz={12.5} p={14}>
+                  {previewError}
+                </Text>
+              ) : preview ? (
+                <pre className="output-dock-pre mono">{preview}</pre>
+              ) : (
+                <Text c="dimmed" fz={12.5} p={14}>
+                  关联订阅后这里会显示最终生成的配置。
+                </Text>
+              )}
+            </Box>
+          )}
+        </Box>
+      )}
+      </Box>
 
       {/* 吸底保存栏（portal 到主列底部） */}
       {saveSlot && createPortal(saveBar, saveSlot)}
