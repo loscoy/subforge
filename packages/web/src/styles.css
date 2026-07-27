@@ -2,25 +2,35 @@
 :root {
   /* 内容列最大宽度：常见笔电（≤1680）满宽铺开，超宽屏才收口，避免表格拉成一条线 */
   --sf-content-max: 1680px;
-  --sf-app-background: #f3f5f8;
+  /* 表面层级：页面底(凹) → 面板(基准，浮起) → inset(输入井，比面板更深)。
+     三层必须拉开可见差距，否则整个界面塌成一个平面，就是「死板」的主因。 */
+  --sf-app-background: #eceef3;
   --sf-chat-accent: #7c3aed;
   --sf-surface: #ffffff;
-  --sf-surface-subtle: #f3f4f7;
-  --sf-border-subtle: #e7e7eb;
-  --sf-border-interactive: #c9cad1;
+  --sf-surface-subtle: #f4f6f9;
+  --sf-surface-inset: #eff1f6;
+  --sf-border-subtle: #e3e6ed;
+  --sf-border-interactive: #c9cdd8;
   --sf-focus-ring: rgba(124, 58, 237, 0.34);
   --sf-amber: #e8590c;
   --sf-amber-bg: rgba(245, 159, 0, 0.12);
+  /* 阴影带蓝灰色相而非纯黑：纯黑投影在浅色下会发脏、显廉价 */
+  --sf-shadow-card: 0 1px 2px rgba(24, 28, 45, 0.04), 0 6px 16px -6px rgba(24, 28, 45, 0.08);
+  --sf-shadow-raised: 0 2px 4px rgba(24, 28, 45, 0.05), 0 14px 32px -10px rgba(24, 28, 45, 0.13);
 }
 [data-mantine-color-scheme='dark'] {
-  --sf-app-background: #0d0f17;
-  --sf-surface: #171923;
-  --sf-surface-subtle: #20232f;
-  --sf-border-subtle: #2b2e39;
-  --sf-border-interactive: #444856;
+  --sf-app-background: #090b11;
+  --sf-surface: #14161f;
+  --sf-surface-subtle: #1c1f2b;
+  /* 暗色下输入井比面板「更暗」才是现代做法（浅色是反的） */
+  --sf-surface-inset: #0e1018;
+  --sf-border-subtle: #262a36;
+  --sf-border-interactive: #3d4150;
   --sf-focus-ring: rgba(167, 139, 250, 0.46);
   --sf-amber: #f59f00;
   --sf-amber-bg: rgba(245, 159, 0, 0.15);
+  --sf-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.34), 0 8px 22px -8px rgba(0, 0, 0, 0.5);
+  --sf-shadow-raised: 0 2px 6px rgba(0, 0, 0, 0.4), 0 18px 40px -12px rgba(0, 0, 0, 0.62);
 }
 [data-mantine-color-scheme='light'] {
   --mantine-color-default-border: var(--sf-border-interactive);
@@ -52,6 +62,36 @@ body {
 .mantine-ActionIcon-root,
 .mantine-Button-root {
   transition: background-color 160ms ease, border-color 160ms ease, color 160ms ease, opacity 160ms ease;
+}
+/* 按下时的物理反馈：没有它，按钮点下去毫无手感 */
+.mantine-Button-root:active:not(:disabled),
+.mantine-ActionIcon-root:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* ---------- 输入控件：内凹的「井」，而不是与卡片同色的描边框 ----------
+   这是让表单从「一堆同重量矩形」变现代的关键一步：静息时凹陷、聚焦时浮起并点亮。 */
+.mantine-Input-input,
+.mantine-NativeSelect-input {
+  background: var(--sf-surface-inset);
+  border-color: var(--sf-border-subtle);
+  transition: background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+}
+.mantine-Input-input:hover:not(:disabled):not(:focus) {
+  border-color: var(--sf-border-interactive);
+}
+.mantine-Input-input:focus,
+.mantine-Input-input:focus-within,
+.mantine-NativeSelect-input:focus {
+  background: var(--sf-surface);
+  border-color: var(--mantine-color-violet-5);
+}
+/* 标签比值弱：小一号、次要色，值才是主角 */
+.mantine-InputWrapper-label {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--mantine-color-dimmed);
+  margin-bottom: 5px;
 }
 .mono {
   font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -425,9 +465,15 @@ body {
   grid-template-columns: 236px minmax(0, 1fr);
   align-items: stretch;
   padding: 0;
+  /* 面板真正浮在凹陷的页面底之上 */
+  box-shadow: var(--sf-shadow-card);
+  border: 1px solid var(--sf-border-subtle);
+  overflow: hidden;
 }
+/* 左侧列表是「次级表面」，比详情区略沉，两栏才有主次而不是对半平分 */
 .profiles-list {
   border-right: 1px solid var(--sf-border-subtle);
+  background: var(--sf-surface-subtle);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -457,14 +503,35 @@ body {
     display: flex;
     flex-direction: column;
   }
-  /* 除脚本外的区块内容较短，各自滚动即可 */
-  .app-shell[data-fill] .profile-detail-body > :last-child {
+  /* 工作区吃掉详情区剩余高度，内部两栏各自滚动 */
+  .app-shell[data-fill] .profile-detail-body > .profile-workspace {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .app-shell[data-fill] .profile-workspace > .section-pane {
     min-height: 0;
     overflow-y: auto;
   }
 }
 .profiles-detail > * {
   min-width: 0;
+}
+/* 空态：占满详情区并垂直居中，图标给个软底盘，别是一个孤零零的线框图标 */
+.profiles-empty {
+  flex: 1;
+  min-height: 320px;
+  padding: 48px 20px;
+}
+.profiles-empty-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 14px;
+  background: var(--sf-surface-subtle);
+  color: var(--mantine-color-violet-6);
+  margin-bottom: 2px;
 }
 .profile-row {
   display: flex;
@@ -484,9 +551,29 @@ body {
   background: var(--mantine-color-violet-light);
   border-left-color: var(--mantine-color-violet-6);
 }
+/* 名称即标题：默认无框大字（像 Notion/Linear 的文档标题），hover 才浮出可编辑暗示 */
+.profile-title-input .mantine-Input-input {
+  font-size: 21px;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  height: 40px;
+  padding-inline: 9px;
+  margin-inline-start: -9px;
+  background: transparent;
+  border-color: transparent;
+  color: var(--mantine-color-text);
+}
+.profile-title-input .mantine-Input-input:hover:not(:focus) {
+  background: var(--sf-surface-subtle);
+  border-color: transparent;
+}
+.profile-title-input .mantine-Input-input:focus {
+  background: var(--sf-surface-inset);
+  border-color: var(--mantine-color-violet-5);
+}
 .profile-head-grid {
   display: grid;
-  grid-template-columns: minmax(150px, 1fr) 140px minmax(230px, 1.4fr) auto;
+  grid-template-columns: 150px minmax(230px, 1fr);
   gap: 12px;
   align-items: end;
 }
@@ -513,6 +600,89 @@ body {
 .section-tab[data-active] {
   color: var(--mantine-color-violet-light-color);
   box-shadow: inset 0 -2px 0 var(--mantine-color-violet-6);
+}
+/* 切换区块时内容淡入上移，不再硬切（reduced-motion 下由文末统一关闭） */
+.section-pane {
+  animation: sf-pane-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* ---------- 工作区：表单 | 输出预览 左右分栏 ---------- */
+.profile-workspace {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+}
+/* 宽屏且预览展开时才分栏：表单在左、预览在右，各自独立滚动。
+   预览列用 minmax 保底 320px，配置 YAML 缩到一条线就没意义了。 */
+@media (min-width: 62em) {
+  .profile-workspace[data-split] {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
+    align-items: stretch;
+  }
+  .profile-workspace[data-split] > .output-dock {
+    border-top: none;
+    border-left: 1px solid var(--sf-border-subtle);
+    min-height: 0;
+  }
+}
+
+/* ---------- 内联输出预览 ---------- */
+.output-dock {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-top: 1px solid var(--sf-border-subtle);
+  background: var(--sf-surface-subtle);
+}
+.output-dock-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 20px;
+  color: var(--mantine-color-dimmed);
+  transition: background-color 160ms ease;
+}
+.output-dock-head:hover {
+  background: var(--sf-surface-inset);
+}
+.output-dock-caret {
+  display: inline-flex;
+  transition: transform 160ms ease;
+}
+.output-dock-caret[data-open] {
+  transform: rotate(90deg);
+}
+.output-dock-refresh {
+  padding: 2px 8px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+.output-dock-refresh:hover {
+  background: var(--sf-surface);
+  color: var(--mantine-color-text);
+}
+.output-dock-body {
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  border-top: 1px solid var(--sf-border-subtle);
+  background: var(--sf-surface-inset);
+}
+.output-dock-pre {
+  margin: 0;
+  padding: 12px 20px;
+  font-size: 11.5px;
+  line-height: 1.65;
+  white-space: pre;
+  color: var(--mantine-color-text);
+}
+@keyframes sf-pane-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
 }
 .section-tab-badge {
   font-size: 10px;
@@ -580,8 +750,11 @@ body {
 }
 
 /* ---------- 设置页 ---------- */
+/* 表单限宽保证可读性，但要居中——左对齐会在宽屏上把整页重心拉偏 */
 .settings-page {
   max-width: 760px;
+  margin-inline: auto;
+  width: 100%;
 }
 .settings-card-head {
   border-bottom: 1px solid var(--sf-border-subtle);
@@ -692,13 +865,17 @@ body {
   flex: 1;
   min-height: 0;
   overflow: auto;
+  /* 对话区是凹陷画布，气泡/工具卡才浮得起来（与主界面「页面底 → 面板」同构） */
+  background: var(--sf-app-background);
+  border: 1px solid var(--sf-border-subtle);
+  border-radius: 8px;
   /* 必须自成定位上下文：否则内部任何绝对定位元素都会把包含块一路找到
      .agent-drawer（sticky 也算定位元素），逃过这里的 overflow 裁剪，
      按静态位置停在滚动区深处，把整页文档高度撑到上万 px（底下全是空白）。 */
   position: relative;
   /* 滚到顶/底时不把滚动传给背后的页面（手机全屏态尤其明显） */
   overscroll-behavior: contain;
-  padding: 6px 2px;
+  padding: 12px 10px;
   display: flex;
   flex-direction: column;
   gap: 12px;
@@ -718,24 +895,29 @@ body {
   align-items: flex-start;
   max-width: min(92%, 960px);
 }
+/* 与主界面同一套材质语言：正文用「填充卡」，中间过程用「描边卡」，两者靠材质而非颜色区分。 */
 .msg {
   padding: 9px 13px;
-  border-radius: 13px;
+  border-radius: 6px;
   font-size: 13.5px;
   line-height: 1.55;
 }
 .msg.user {
   background: linear-gradient(180deg, #8347e6, #7c3aed);
   color: #fff;
-  border-bottom-right-radius: 4px;
   white-space: pre-wrap;
 }
+/* 助手回复=主内容，实心浮起（对话区底色是凹的，它才显得浮） */
 .msg.assistant {
-  background: var(--sf-surface-subtle);
-  border-bottom-left-radius: 4px;
+  background: var(--sf-surface);
+  border: 1px solid var(--sf-border-subtle);
+  box-shadow: var(--sf-shadow-card);
 }
-[data-mantine-color-scheme='dark'] .msg.assistant {
-  background: var(--sf-surface-subtle);
+/* 输入框并入「线框」体系：边框用与卡片一致的中性色，聚焦不再变紫（去掉高亮/毛玻璃错觉） */
+.chat-composer textarea,
+.chat-composer textarea:focus {
+  border-color: var(--sf-border-subtle);
+  box-shadow: none;
 }
 
 /* ---------- 一轮里的中间过程：思考 + 工具调用，均可展开看内容 ---------- */
@@ -748,7 +930,7 @@ body {
 }
 .trace-item {
   border: 1px solid var(--sf-border-subtle);
-  border-radius: 8px;
+  border-radius: 6px;
   background: var(--sf-surface);
   overflow: hidden;
 }
@@ -836,6 +1018,17 @@ body {
   background: transparent;
   color: var(--mantine-color-dimmed);
 }
+/* 进行中一轮的状态行：思考球 + 动态文案（联网检索 / 测试节点 / 思考中…） */
+.agent-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 1px 2px;
+  min-height: 22px;
+}
+.agent-status canvas {
+  flex-shrink: 0;
+}
 .caret {
   display: inline-block;
   width: 6px;
@@ -865,10 +1058,22 @@ body {
   .mantine-Button-root {
     transition: none;
   }
+  /* 本次新增的动效同样要能被关掉 */
+  .section-pane {
+    animation: none;
+  }
+  .output-dock-caret,
+  .mantine-Input-input {
+    transition: none;
+  }
+  .mantine-Button-root:active:not(:disabled),
+  .mantine-ActionIcon-root:active:not(:disabled) {
+    transform: none;
+  }
 }
 @media (max-width: 64em) {
   .profile-head-grid {
-    grid-template-columns: minmax(0, 1fr) 140px;
+    grid-template-columns: 130px minmax(0, 1fr);
   }
   .mcp-card {
     grid-template-columns: minmax(0, 1fr);
@@ -899,18 +1104,21 @@ body {
     min-width: 36px;
     min-height: 36px;
   }
+  /* 触屏下发送键被上面的规则拔到 44px，输入框也给到 44px 与之等高（桌面下两者同为 36px） */
+  .chat-composer textarea {
+    min-height: 44px;
+  }
   .form-grid-2,
   .proxy-group-main,
   .profiles-card {
     grid-template-columns: minmax(0, 1fr);
   }
-  /* 名称 / 输出格式各占整行，分享链接与「更多」按钮同行 */
+  /* 窄屏：输出格式与分享链接各占整行 */
   .profile-head-grid {
-    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-columns: minmax(0, 1fr);
   }
-  .profile-head-grid > :nth-child(1),
-  .profile-head-grid > :nth-child(2) {
-    grid-column: 1 / -1;
+  .profile-title-input .mantine-Input-input {
+    font-size: 19px;
   }
   .profiles-list {
     border-right: none;

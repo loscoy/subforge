@@ -1,4 +1,7 @@
-import { ActionIcon, Collapse, Group, Loader, Text, Textarea, UnstyledButton } from '@mantine/core'
+import { ActionIcon, Collapse, Group, Loader, Text, Textarea, UnstyledButton, useComputedColorScheme } from '@mantine/core'
+import { useReducedMotion } from '@mantine/hooks'
+import { BorderBeam } from 'border-beam'
+import { ThinkingOrb, type OrbState } from 'thinking-orbs'
 import { useEffect, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -25,6 +28,16 @@ const MUTATING = new Set([
   'delete_template',
   'update_working_memory',
 ])
+
+/** 工具 → 思考球状态与文案。未列出的按名字前缀兜底（见 liveStatus）。 */
+const TOOL_STATUS: Record<string, { state: OrbState; label: string }> = {
+  web_search: { state: 'searching', label: '联网检索…' },
+  web_fetch: { state: 'searching', label: '抓取网页…' },
+  test_nodes: { state: 'solving', label: '测试节点…' },
+  run_preview: { state: 'solving', label: '生成预览…' },
+  refresh_subscription: { state: 'solving', label: '刷新订阅…' },
+  validate_profile: { state: 'solving', label: '校验配置…' },
+}
 
 /** 单段详情的展示上限：工具结果动辄几百个节点，整段 dump 会把面板拖垮 */
 const MAX_DETAIL = 4000
@@ -208,6 +221,36 @@ interface LiveTurn {
   steps: AgentStep[]
 }
 
+/** 从进行中的一轮推导思考球的状态与文案：当前运行的工具 > 正在思考 > 默认等待。 */
+function liveStatus(live: LiveTurn): { state: OrbState; label: string } {
+  const running = live.steps.find((s) => s.result === undefined && s.error === undefined)
+  if (running) {
+    const mapped = TOOL_STATUS[running.tool]
+    if (mapped) return mapped
+    if (/^(list_|get_)/.test(running.tool)) return { state: 'searching', label: '查询数据…' }
+    if (/^(create_|update_|delete_|write_|save_|apply_|rollback_)/.test(running.tool))
+      return { state: 'working', label: '应用改动…' }
+    return { state: 'working', label: '处理中…' }
+  }
+  if (live.reasoningActive) return { state: 'solving', label: '思考中…' }
+  return { state: 'working', label: '思考中…' }
+}
+
+/** 进行中一轮的状态指示：思考球（随活动切换状态）+ 动态文案，替代此前的「思考中…」纯文本。
+ *  theme 显式传入——orb 的 auto 只认 data-theme/.dark，认不出 Mantine 的 color-scheme。
+ *  reduced 时冻结动画（与全局 prefers-reduced-motion 处理保持一致）。 */
+function LiveStatus({ live, scheme, reduced }: { live: LiveTurn; scheme: 'light' | 'dark'; reduced: boolean }) {
+  const { state, label } = liveStatus(live)
+  return (
+    <div className="agent-status" role="status" aria-live="polite">
+      <ThinkingOrb state={state} size={20} theme={scheme} paused={reduced} aria-label={label} />
+      <Text span c="dimmed" fz="sm">
+        {label}
+      </Text>
+    </div>
+  )
+}
+
 /** 紧凑的 Agent 对话面板：流式输出 + 思考/工具可展开 + Markdown。对话产生写操作后回调 onChanged。 */
 export function AgentChatPanel({
   sessionId,
@@ -234,6 +277,9 @@ export function AgentChatPanel({
   // 未传 height 即填充模式（用 flex 撑满父容器）。注意不能给 height 设默认值，
   // 否则默认参数会把显式传入的 undefined 变成默认数值，导致 fill 永远为 false。
   const fill = height == null
+  // 思考球 / 流光边框的主题与减弱动画：显式取 Mantine 的 color-scheme 喂给两个组件
+  const scheme = useComputedColorScheme('light')
+  const reduced = useReducedMotion(false) ?? false
   const [items, setItems] = useState<ChatItem[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
@@ -441,12 +487,14 @@ export function AgentChatPanel({
               busy={busy}
               reasoningStreaming={busy && live.reasoningActive}
             />
-            {(live.text || !live.steps.length) && (
+            {live.text ? (
               <div className="msg assistant">
-                {live.text ? <Markdown text={live.text} /> : <Text span c="dimmed">思考中…</Text>}
-                {live.text && busy && <span className="caret" />}
+                <Markdown text={live.text} />
+                {busy && <span className="caret" />}
               </div>
-            )}
+            ) : busy ? (
+              <LiveStatus live={live} scheme={scheme} reduced={reduced} />
+            ) : null}
           </div>
         )}
       </div>
@@ -456,31 +504,45 @@ export function AgentChatPanel({
         </Text>
       )}
       <Group className="chat-composer" gap={8} pt={10} mt={8} align="flex-end">
-        <Textarea
+        {/* 流光边框：常驻输入框（pulse-inner 内敛不外溢，不会盖到发送键）。mono + 中低强度(0.5)——
+            单色呼吸微光，避免彩色辉光糊成「毛玻璃」，与线框体系不冲突。
+            theme 显式传 color-scheme（默认 dark 会在浅色下发暗）；borderRadius 对齐 Textarea 的 sm(6px)；
+            reduced-motion 时关闭。 */}
+        <BorderBeam
+          size="pulse-inner"
+          colorVariant="mono"
+          theme={scheme}
+          active={!reduced}
+          borderRadius={6}
+          strength={0.5}
           style={{ flex: 1 }}
-          autosize
-          minRows={1}
-          maxRows={5}
-          placeholder="描述你想做的调整…（Enter 发送）"
-          value={input}
-          onChange={(e) => setInput(e.currentTarget.value)}
-          onKeyDown={(e) => {
-            // 输入法组词时的回车是「确认候选词」，不能当发送。isComposing 覆盖现代浏览器；
-            // keyCode===229 兜底部分输入法在组字期间 isComposing 仍为 false 的情况。
-            if (
-              e.key === 'Enter' &&
-              !e.shiftKey &&
-              !e.nativeEvent.isComposing &&
-              e.nativeEvent.keyCode !== 229
-            ) {
-              e.preventDefault()
-              void send()
-            }
-          }}
-        />
+        >
+          <Textarea
+            style={{ width: '100%' }}
+            autosize
+            minRows={1}
+            maxRows={5}
+            placeholder="描述你想做的调整…（Enter 发送）"
+            value={input}
+            onChange={(e) => setInput(e.currentTarget.value)}
+            onKeyDown={(e) => {
+              // 输入法组词时的回车是「确认候选词」，不能当发送。isComposing 覆盖现代浏览器；
+              // keyCode===229 兜底部分输入法在组字期间 isComposing 仍为 false 的情况。
+              if (
+                e.key === 'Enter' &&
+                !e.shiftKey &&
+                !e.nativeEvent.isComposing &&
+                e.nativeEvent.keyCode !== 229
+              ) {
+                e.preventDefault()
+                void send()
+              }
+            }}
+          />
+        </BorderBeam>
         <ActionIcon
-          size={40}
-          radius="md"
+          size={36}
+          radius="sm"
           color={busy ? 'red' : undefined}
           onClick={() => (busy ? stop() : void send())}
           aria-label={busy ? '停止生成' : '发送'}
