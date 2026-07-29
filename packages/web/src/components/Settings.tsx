@@ -8,13 +8,14 @@ import {
   Group,
   NativeSelect,
   NumberInput,
+  PasswordInput,
   Stack,
   Text,
   TextInput,
 } from '@mantine/core'
 import { notifications } from '@mantine/notifications'
 import { useEffect, useState } from 'react'
-import { api } from '../api'
+import { api, apiErrorText, authApi } from '../api'
 import { IAlert, ICheck, IGlobe, IKey, IPlug, IPulse, ISearch, ISparkles } from '../icons'
 import {
   FETCH_ENGINES,
@@ -262,6 +263,28 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
   const [probe, setProbe] = useState<ProbeResult | null>(null)
   // 草稿只存「改动过的字段」，未改动的保持 undefined，直接对应 PUT 的三态语义
   const [patch, setPatch] = useState<SettingsPatch>({})
+  const [pwdOld, setPwdOld] = useState('')
+  const [pwdNew, setPwdNew] = useState('')
+  const [pwdConfirm, setPwdConfirm] = useState('')
+  const [pwdBusy, setPwdBusy] = useState(false)
+
+  const changePassword = async () => {
+    if (pwdNew !== pwdConfirm) {
+      notifications.show({ color: 'red', message: '两次输入的新密码不一致' })
+      return
+    }
+    setPwdBusy(true)
+    try {
+      await authApi.changePassword({ oldPassword: pwdOld, newPassword: pwdNew })
+      notifications.show({ color: 'teal', message: '密码已修改，请重新登录' })
+      // 改密码会吊销所有会话，整页刷新回登录页
+      window.location.reload()
+    } catch (e) {
+      notifications.show({ color: 'red', message: apiErrorText(e) })
+    } finally {
+      setPwdBusy(false)
+    }
+  }
 
   const load = async () => {
     setLoadError('')
@@ -503,7 +526,7 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
       <SectionCard icon={<IKey size={17} />} title="远端 MCP" sub="外部 Agent 连接本实例的独立口令">
         <SecretInput
           label="MCP Token"
-          description="点「生成」即可，不用自己想。清除即关闭远端 MCP，与管理口令 ADMIN_TOKEN 相互独立。"
+          description="点「生成」即可，不用自己想。清除即关闭远端 MCP，与管理界面的登录账号相互独立。"
           view={data.mcpToken}
           draft={patch.mcpToken}
           disabled={lockSecrets}
@@ -535,6 +558,22 @@ export function Settings({ onSaved }: { onSaved?: () => void }) {
             忘了就重新生成一个，两边同步改即可。
           </Alert>
         )}
+      </SectionCard>
+
+      <SectionCard icon={<IKey size={17} />} title="账号安全" sub="修改管理界面的登录密码，改完需重新登录">
+        <PasswordInput label="旧密码" value={pwdOld} onChange={(e) => setPwdOld(e.currentTarget.value)} />
+        <PasswordInput
+          label="新密码"
+          description="至少 8 位"
+          value={pwdNew}
+          onChange={(e) => setPwdNew(e.currentTarget.value)}
+        />
+        <PasswordInput label="确认新密码" value={pwdConfirm} onChange={(e) => setPwdConfirm(e.currentTarget.value)} />
+        <Group justify="flex-start">
+          <Button loading={pwdBusy} disabled={!pwdOld || !pwdNew} onClick={() => void changePassword()}>
+            修改密码
+          </Button>
+        </Group>
       </SectionCard>
 
       <Card>

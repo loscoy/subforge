@@ -169,6 +169,18 @@ function runContract(name: string, make: () => Storage) {
       await s.setWorkingMemory('mem')
       expect(await s.getSettings()).toBe('{"agent":{"model":"b"}}')
     })
+
+    it('auth kv 读写', async () => {
+      const s = make()
+      expect(await s.getAuth()).toBeUndefined()
+      await s.setAuth('{"sessions":[]}')
+      expect(await s.getAuth()).toBe('{"sessions":[]}')
+      await s.setAuth('{"sessions":[{"tokenHash":"x"}]}')
+      expect(await s.getAuth()).toBe('{"sessions":[{"tokenHash":"x"}]}')
+      // 与 settings 共用 kv 表但互不干扰
+      await s.setSettings('{}')
+      expect(await s.getAuth()).toBe('{"sessions":[{"tokenHash":"x"}]}')
+    })
   })
 }
 

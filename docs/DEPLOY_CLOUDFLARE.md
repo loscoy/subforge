@@ -23,9 +23,10 @@ cd packages/server
 # 2. 创建 D1，把输出的 database_id 填进 wrangler.jsonc
 npx wrangler d1 create subforge
 
-# 3. 配置两个引导 secret（模型 / 联网工具 / MCP 口令改在 Web「设置」页里配）
-npx wrangler secret put ADMIN_TOKEN    # 管理接口口令
+# 3. 配置引导 secret（模型 / 联网工具 / MCP 口令改在 Web「设置」页里配）
 npx wrangler secret put SETTINGS_KEY   # 加密库里密钥字段的主密钥，如 openssl rand -base64 32
+# 管理鉴权是账号密码登录：首次打开网页时创建。存量部署升级时保留旧的
+# ADMIN_TOKEN secret 直到建号完成（建号需验证它，防抢注），之后可删除。
 
 # 4. 在 packages/server/.cf-release.json 配置 account_id / database_id
 # 5. 构建、迁移并部署（唯一推荐方式）
@@ -34,7 +35,7 @@ npm run cf:release
 
 本地开发：`npm run cf:migrate:local` 后 `npm run cf:dev`。
 
-> ⚠️ **务必用 `wrangler secret put` 设置 `ADMIN_TOKEN` / `SETTINGS_KEY`，不要在 dashboard 里设「明文变量(Variables)」。**
+> ⚠️ **务必用 `wrangler secret put` 设置 `SETTINGS_KEY`（及升级保护期间的 `ADMIN_TOKEN`），不要在 dashboard 里设「明文变量(Variables)」。**
 > `wrangler deploy` 会用配置文件里的 `vars` 覆盖明文变量——配置里没有的会被清空；而加密 secret 跨部署保留。
 > 一键发布：`npm run cf:release`（见下）。
 >

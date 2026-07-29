@@ -2,9 +2,7 @@ import {
   ActionIcon,
   Box,
   Button,
-  Card,
   Group,
-  PasswordInput,
   Text,
   Title,
   Tooltip,
@@ -12,14 +10,15 @@ import {
   useMantineColorScheme,
 } from '@mantine/core'
 import { useEffect, useState } from 'react'
-import { api, getToken, setToken } from './api'
+import { api, authApi } from './api'
 import { AgentDock } from './components/AgentDock'
+import { AuthGate } from './components/AuthGate'
 import { LoadError, PageSkeleton } from './components/AsyncState'
 import { Mcp } from './components/Mcp'
 import { Profiles } from './components/Profiles'
 import { Settings } from './components/Settings'
 import { Subscriptions } from './components/Subscriptions'
-import { IBrand, IMoon, IPlus, ISparkles, ISun } from './icons'
+import { IBrand, ILogout, IMoon, IPlus, ISparkles, ISun } from './icons'
 import { readView, writeView, type View } from './navigation'
 import type { Meta } from './types'
 
@@ -77,8 +76,7 @@ export function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
   const [metaStatus, setMetaStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [metaError, setMetaError] = useState('')
-  const [needToken, setNeedToken] = useState(false)
-  const [tokenInput, setTokenInput] = useState(getToken())
+  const [auth, setAuth] = useState<'loading' | 'setup' | 'setup-legacy' | 'login' | 'ready'>('loading')
   const [agentOpen, setAgentOpen] = useState(false)
   const [subsAddOpen, setSubsAddOpen] = useState(false)
   // 配置页当前选中的档，用于 Agent 抽屉的上下文切换
@@ -92,11 +90,11 @@ export function App() {
       .then((m) => {
         setMeta(m)
         setMetaStatus('success')
-        setNeedToken(false)
       })
       .catch((e) => {
         if (String(e).includes('401')) {
-          setNeedToken(true)
+          // 会话过期/被吊销 → 落回登录页
+          setAuth('login')
           setMetaStatus('error')
           return
         }
@@ -105,7 +103,22 @@ export function App() {
       })
   }
   useEffect(() => {
-    loadMeta()
+    authApi
+      .status()
+      .then((s) => {
+        if (!s.initialized) setAuth(s.legacyTokenRequired ? 'setup-legacy' : 'setup')
+        else if (!s.authenticated) setAuth('login')
+        else {
+          setAuth('ready')
+          loadMeta()
+        }
+      })
+      .catch((e) => {
+        // 状态接口都挂了 → 落到主界面的 LoadError 展示错误
+        setMetaError(String(e))
+        setMetaStatus('error')
+        setAuth('ready')
+      })
   }, [])
   useEffect(() => {
     const onPopState = () => setTab(readView(window.location.search))
@@ -121,40 +134,18 @@ export function App() {
     }
   }
 
-  if (needToken) {
+  // loading 阶段照常渲染主壳（骨架屏），避免白屏闪烁；仅在明确未登录/未初始化时切到门页
+  if (auth !== 'ready' && auth !== 'loading') {
     return (
-      <Box style={{ display: 'grid', placeItems: 'center', minHeight: '100svh' }}>
-        <Card w={{ base: 'calc(100% - 32px)', xs: 400 }} padding="xl">
-          <Brand />
-          <Title order={3} mt="md">
-            需要管理口令
-          </Title>
-          <Text c="dimmed" fz="sm" mt={4} mb="md">
-            此实例设置了访问口令，输入后即可进入。
-          </Text>
-          <PasswordInput
-            value={tokenInput}
-            onChange={(e) => setTokenInput(e.currentTarget.value)}
-            placeholder="ADMIN_TOKEN"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                setToken(tokenInput)
-                loadMeta()
-              }
-            }}
-          />
-          <Button
-            fullWidth
-            mt="md"
-            onClick={() => {
-              setToken(tokenInput)
-              loadMeta()
-            }}
-          >
-            进入
-          </Button>
-        </Card>
-      </Box>
+      <AuthGate
+        mode={auth === 'login' ? 'login' : 'setup'}
+        legacyTokenRequired={auth === 'setup-legacy'}
+        brand={<Brand />}
+        onDone={() => {
+          setAuth('ready')
+          loadMeta()
+        }}
+      />
     )
   }
 
@@ -206,6 +197,19 @@ export function App() {
             {meta ? ` · ${meta.renderers.join(' / ')}` : ''}
           </Text>
           <ThemeToggle />
+          <Tooltip label="登出">
+            <ActionIcon
+              variant="default"
+              size={34}
+              radius={7}
+              aria-label="登出"
+              onClick={() => {
+                void authApi.logout().finally(() => setAuth('login'))
+              }}
+            >
+              <ILogout size={15} />
+            </ActionIcon>
+          </Tooltip>
           <Button
             variant={agentOpen ? 'filled' : 'light'}
             h={34}

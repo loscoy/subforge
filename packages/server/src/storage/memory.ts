@@ -10,6 +10,7 @@ export class InMemoryStorage implements Storage {
   private messages: AgentMessage[] = []
   private workingMemory = ''
   private settings: string | undefined
+  private auth: string | undefined
 
   async listSubscriptions(): Promise<Subscription[]> {
     return [...this.subs.values()].sort((a, b) => a.createdAt - b.createdAt)
@@ -106,6 +107,13 @@ export class InMemoryStorage implements Storage {
   }
   async setSettings(json: string) {
     this.settings = json
+  }
+
+  async getAuth() {
+    return this.auth
+  }
+  async setAuth(json: string) {
+    this.auth = json
   }
 
   async close() {}

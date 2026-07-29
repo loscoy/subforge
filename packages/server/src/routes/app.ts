@@ -1,7 +1,18 @@
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
+import { getCookie, setCookie, deleteCookie } from 'hono/cookie'
 import { cors } from 'hono/cors'
 import { streamSSE } from 'hono/streaming'
 import { SCRIPT_DTS, getRenderer, listRenderers, parseSubscription, type ScriptRunner } from '@subforge/core'
+import {
+  SESSION_TTL_MS,
+  addSession,
+  hasValidSession,
+  hashPassword,
+  loadAuthState,
+  revokeSession,
+  saveAuthState,
+  verifyPassword,
+} from '../auth.js'
 import type { NodeChecker } from '../health.js'
 import type { AgentModelConfig, AgentRunner } from '../agent/index.js'
 import { fallbackTitle, generateSessionTitle } from '../agent/index.js'
@@ -109,28 +120,125 @@ export function createApp(deps: AppDeps): Hono {
     return handleMcpHttpRequest(c.req.raw, { storage, runner, checkNodes: deps.checkNodes })
   })
 
-  // ---- 管理 API（鉴权：默认失败关闭） ----
+  // ---- 管理 API（鉴权：账号会话，默认失败关闭） ----
+  const SESSION_COOKIE = 'subforge_session'
+  const sessionTokenOf = (c: Context) =>
+    getCookie(c, SESSION_COOKIE) ?? c.req.header('Authorization')?.match(/^Bearer\s+(.+)$/i)?.[1]
+  const setSessionCookie = (c: Context, token: string) =>
+    setCookie(c, SESSION_COOKIE, token, {
+      httpOnly: true,
+      sameSite: 'Lax',
+      path: '/',
+      maxAge: Math.floor(SESSION_TTL_MS / 1000),
+      secure: new URL(c.req.url).protocol === 'https:',
+    })
+
+  // 登录失败节流（进程内计数；Workers 多 isolate 下不完美，底线是 PBKDF2 慢哈希）
+  let loginFailures = 0
+  let loginLockedUntil = 0
+
   const api = new Hono()
-  if (config.adminToken) {
+  if (config.allowNoAuth) {
+    console.warn('⚠ SubForge 正在【无鉴权】模式运行（SUBFORGE_ALLOW_NO_AUTH=1）：任何人都可调用管理接口/执行脚本，切勿暴露到公网。')
+  } else {
+    // 白名单：登录前必须可达的端点。/auth/logout 无会话时也应幂等成功。
+    const PUBLIC_AUTH_PATHS = new Set(['/api/auth/status', '/api/auth/setup', '/api/auth/login', '/api/auth/logout'])
     api.use('*', async (c, next) => {
-      const auth = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') || c.req.header('X-Admin-Token')
-      if (auth !== config.adminToken) return c.json({ error: '未授权' }, 401)
+      if (PUBLIC_AUTH_PATHS.has(c.req.path)) return next()
+      const state = await loadAuthState(storage)
+      if (!state.account) return c.json({ error: '尚未初始化管理员账号', needsSetup: true }, 401)
+      const token = sessionTokenOf(c)
+      if (!token || !(await hasValidSession(state, token, now()))) return c.json({ error: '未授权' }, 401)
       await next()
     })
-  } else if (!config.allowNoAuth) {
-    // 未配置口令且未显式允许无鉴权 → 拒绝提供管理接口，避免任意跑脚本/抓 URL 的敞开风险。
-    api.use('*', async (c, _next) =>
-      c.json(
-        {
-          error:
-            '本实例未配置 ADMIN_TOKEN，已拒绝以无鉴权方式提供管理接口。请设置 ADMIN_TOKEN；如确为本地自用需无鉴权，设 SUBFORGE_ALLOW_NO_AUTH=1。',
-        },
-        503,
-      ),
-    )
-  } else {
-    console.warn('⚠ SubForge 正在【无鉴权】模式运行（SUBFORGE_ALLOW_NO_AUTH=1）：任何人都可调用管理接口/执行脚本，切勿暴露到公网。')
   }
+
+  // ---- 账号登录（/api/auth/*） ----
+  api.get('/auth/status', async (c) => {
+    // 无鉴权模式下不存在账号概念，直接放行，前端不弹建号/登录门
+    if (config.allowNoAuth) {
+      return c.json({ initialized: true, authenticated: true, legacyTokenRequired: false })
+    }
+    const state = await loadAuthState(storage)
+    const token = sessionTokenOf(c)
+    const authenticated = !!state.account && !!token && (await hasValidSession(state, token, now()))
+    return c.json({
+      initialized: !!state.account,
+      authenticated,
+      username: authenticated ? state.account?.username : undefined,
+      // 升级保护：存量部署环境仍设有 ADMIN_TOKEN 时，初始化需先验旧口令（防公网实例被抢注）
+      legacyTokenRequired: !state.account && !!config.adminToken,
+    })
+  })
+
+  api.post('/auth/setup', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
+    const username = typeof body.username === 'string' ? body.username.trim() : ''
+    const password = typeof body.password === 'string' ? body.password : ''
+    if (!username || password.length < 8) return c.json({ error: '用户名不能为空，密码至少 8 位' }, 400)
+    const state = await loadAuthState(storage)
+    if (state.account) return c.json({ error: '账号已存在' }, 409)
+    if (config.adminToken && !(await timingSafeEqual(String(body.legacyToken ?? ''), config.adminToken))) {
+      return c.json({ error: '需要正确的 ADMIN_TOKEN 才能初始化账号', legacyTokenRequired: true }, 401)
+    }
+    state.account = { username, ...(await hashPassword(password)) }
+    const token = await addSession(state, now())
+    await saveAuthState(storage, state)
+    setSessionCookie(c, token)
+    return c.json({ ok: true, token }, 201)
+  })
+
+  api.post('/auth/login', async (c) => {
+    if (now() < loginLockedUntil) return c.json({ error: '尝试过于频繁，请稍后再试' }, 429)
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
+    const state = await loadAuthState(storage)
+    if (!state.account) return c.json({ error: '尚未初始化管理员账号', needsSetup: true }, 401)
+    const ok =
+      (await timingSafeEqual(String(body.username ?? ''), state.account.username)) &&
+      (await verifyPassword(String(body.password ?? ''), state.account))
+    if (!ok) {
+      loginFailures += 1
+      if (loginFailures >= 5) {
+        loginFailures = 0
+        loginLockedUntil = now() + 30_000
+      }
+      return c.json({ error: '用户名或密码错误' }, 401)
+    }
+    loginFailures = 0
+    loginLockedUntil = 0
+    const token = await addSession(state, now())
+    await saveAuthState(storage, state)
+    setSessionCookie(c, token)
+    return c.json({ ok: true, token })
+  })
+
+  api.post('/auth/logout', async (c) => {
+    const token = sessionTokenOf(c)
+    if (token) {
+      const state = await loadAuthState(storage)
+      await revokeSession(state, token)
+      await saveAuthState(storage, state)
+    }
+    deleteCookie(c, SESSION_COOKIE, { path: '/' })
+    return c.json({ ok: true })
+  })
+
+  // 改密码：受上方会话中间件保护（不在白名单），改完吊销所有会话
+  api.post('/auth/password', async (c) => {
+    const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
+    const state = await loadAuthState(storage)
+    if (!state.account) return c.json({ error: '尚未初始化管理员账号', needsSetup: true }, 401)
+    const next = typeof body.newPassword === 'string' ? body.newPassword : ''
+    if (next.length < 8) return c.json({ error: '新密码至少 8 位' }, 400)
+    if (!(await verifyPassword(String(body.oldPassword ?? ''), state.account))) {
+      return c.json({ error: '旧密码错误' }, 401)
+    }
+    state.account = { username: state.account.username, ...(await hashPassword(next)) }
+    state.sessions = []
+    await saveAuthState(storage, state)
+    deleteCookie(c, SESSION_COOKIE, { path: '/' })
+    return c.json({ ok: true })
+  })
 
   api.get('/meta', async (c) => {
     const settings = await settingsOf()

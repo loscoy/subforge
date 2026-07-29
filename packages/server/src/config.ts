@@ -8,9 +8,9 @@
 export interface ServerConfig {
   port: number
   dbPath: string
-  /** 管理接口口令（Bearer / X-Admin-Token），为空表示不鉴权（仅本地自用时） */
+  /** （遗留）旧管理口令。仅剩一个用途：初始化账号时的升级保护校验，建号后可从环境移除。 */
   adminToken?: string
-  /** 未设 adminToken 时是否允许无鉴权提供管理接口。默认 false（失败关闭），需显式开启。 */
+  /** 是否允许无鉴权提供管理接口（跳过账号会话校验）。默认 false（失败关闭），需显式开启。 */
   allowNoAuth?: boolean
   /** 加密数据库里密钥字段的主密钥。未设则密钥无法存取，Agent 与远端 MCP 失败关闭。 */
   settingsKey?: string

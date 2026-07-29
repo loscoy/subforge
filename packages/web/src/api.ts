@@ -12,20 +12,12 @@ import type {
   Subscription,
 } from './types'
 
-/** 管理口令（若服务端设了 ADMIN_TOKEN），存 localStorage。 */
-export function getToken(): string {
-  return localStorage.getItem('subforge_admin_token') || ''
-}
-export function setToken(t: string) {
-  localStorage.setItem('subforge_admin_token', t)
-}
-
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  // 鉴权走 HttpOnly Cookie 会话（同源自动携带），无需手动加头
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: {
       'content-type': 'application/json',
-      ...(getToken() ? { 'X-Admin-Token': getToken() } : {}),
       ...(init?.headers || {}),
     },
   })
@@ -34,6 +26,35 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(`${res.status}: ${body}`)
   }
   return res.json() as Promise<T>
+}
+
+export interface AuthStatus {
+  initialized: boolean
+  authenticated: boolean
+  username?: string
+  legacyTokenRequired: boolean
+}
+
+export const authApi = {
+  status: () => req<AuthStatus>('/auth/status'),
+  setup: (b: { username: string; password: string; legacyToken?: string }) =>
+    req<{ ok: boolean }>('/auth/setup', { method: 'POST', body: JSON.stringify(b) }),
+  login: (b: { username: string; password: string }) =>
+    req<{ ok: boolean }>('/auth/login', { method: 'POST', body: JSON.stringify(b) }),
+  logout: () => req<{ ok: boolean }>('/auth/logout', { method: 'POST' }),
+  changePassword: (b: { oldPassword: string; newPassword: string }) =>
+    req<{ ok: boolean }>('/auth/password', { method: 'POST', body: JSON.stringify(b) }),
+}
+
+/** 从 req 抛出的 `${status}: ${body}` 错误里抠出服务端中文 error 文案 */
+export function apiErrorText(e: unknown): string {
+  const raw = String(e instanceof Error ? e.message : e)
+  const body = raw.replace(/^\d+:\s*/, '')
+  try {
+    return (JSON.parse(body) as { error?: string }).error || raw
+  } catch {
+    return raw
+  }
 }
 
 export const api = {
@@ -101,7 +122,7 @@ export const api = {
   ): Promise<void> {
     const res = await fetch('/api/agent/stream', {
       method: 'POST',
-      headers: { 'content-type': 'application/json', ...(getToken() ? { 'X-Admin-Token': getToken() } : {}) },
+      headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ threadId, message, context }),
       signal,
     })
