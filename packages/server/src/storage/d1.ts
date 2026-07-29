@@ -210,6 +210,17 @@ export class D1Storage implements Storage {
       .run()
   }
 
+  async getAuth(): Promise<string | undefined> {
+    const r = (await this.db.prepare("SELECT v FROM kv WHERE k = 'auth'").first('v')) as string | null
+    return r ?? undefined
+  }
+  async setAuth(json: string): Promise<void> {
+    await this.db
+      .prepare("INSERT INTO kv (k,v) VALUES ('auth',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v")
+      .bind(json)
+      .run()
+  }
+
   async close(): Promise<void> {
     /* D1 无需显式关闭 */
   }

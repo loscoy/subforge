@@ -161,5 +161,9 @@ export interface Storage {
   getSettings(): Promise<string | undefined>
   setSettings(json: string): Promise<void>
 
+  // 账号与会话（原始 JSON 字符串）。语义在 auth.ts，存储层视为不透明数据。
+  getAuth(): Promise<string | undefined>
+  setAuth(json: string): Promise<void>
+
   close(): Promise<void>
 }
