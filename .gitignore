@@ -16,3 +16,6 @@ packages/server/src/quickjs.wasm
 
 packages/server/.cf-release.json
 packages/server/wrangler.jsonc.bak
+
+# Claude Code 本地工作区（worktrees / 本地启动配置），不入库
+.claude/
