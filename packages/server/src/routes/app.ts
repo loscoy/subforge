@@ -155,12 +155,16 @@ export function createApp(deps: AppDeps): Hono {
 
   // ---- 账号登录（/api/auth/*） ----
   api.get('/auth/status', async (c) => {
+    // 无鉴权模式下不存在账号概念，直接放行，前端不弹建号/登录门
+    if (config.allowNoAuth) {
+      return c.json({ initialized: true, authenticated: true, legacyTokenRequired: false })
+    }
     const state = await loadAuthState(storage)
     const token = sessionTokenOf(c)
     const authenticated = !!state.account && !!token && (await hasValidSession(state, token, now()))
     return c.json({
       initialized: !!state.account,
-      authenticated: !!config.allowNoAuth || authenticated,
+      authenticated,
       username: authenticated ? state.account?.username : undefined,
       // 升级保护：存量部署环境仍设有 ADMIN_TOKEN 时，初始化需先验旧口令（防公网实例被抢注）
       legacyTokenRequired: !state.account && !!config.adminToken,

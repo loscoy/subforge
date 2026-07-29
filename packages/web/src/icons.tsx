@@ -47,3 +47,4 @@ export const IChevron = (p: IP) => <S {...p}><path d="m9 18 6-6-6-6" /></S>
 export const IPencil = (p: IP) => <S {...p}><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z" /><path d="m15 5 4 4" /></S>
 export const IStop = (p: IP) => <S {...p}><rect x="6.5" y="6.5" width="11" height="11" rx="1.6" fill="currentColor" stroke="none" /></S>
 export const IBulb = (p: IP) => <S {...p}><path d="M15 14c.2-1 .7-1.7 1.5-2.5A5.6 5.6 0 0 0 18 8a6 6 0 0 0-12 0c0 1 .2 2.2 1.5 3.5.8.8 1.3 1.5 1.5 2.5" /><path d="M9 18h6" /><path d="M10 22h4" /></S>
+export const ILogout = (p: IP) => <S {...p}><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><polyline points="16 17 21 12 16 7" /><line x1="21" x2="9" y1="12" y2="12" /></S>

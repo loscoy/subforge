@@ -136,6 +136,13 @@ describe('逃生门与公开出口', () => {
     expect((await app.fetch(new Request('http://x/api/meta'))).status).toBe(200)
   })
 
+  it('无鉴权模式下 status 直接放行，前端不弹建号/登录门', async () => {
+    const { app } = mk({ allowNoAuth: true })
+    const st = await json(await app.fetch(new Request('http://x/api/auth/status')))
+    expect(st.initialized).toBe(true)
+    expect(st.authenticated).toBe(true)
+  })
+
   it('/sub/:token 保持公开（未知 token → 404 而非 401）', async () => {
     const { app } = mk()
     expect((await app.fetch(new Request('http://x/sub/whatever'))).status).toBe(404)
