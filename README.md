@@ -41,7 +41,8 @@
 ### Docker（推荐）
 
 ```bash
-cp .env.example .env   # 填 ADMIN_TOKEN 与 SETTINGS_KEY；模型/MCP 口令进去后在「设置」页配
+cp .env.example .env   # 填 SETTINGS_KEY；模型/MCP 口令进去后在「设置」页配
+# 首次打开网页时会引导创建管理员账号（用户名 + 密码）
 docker compose up -d
 # 打开 http://localhost:8787
 ```
@@ -66,8 +67,8 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 |---|---|
 | `PORT` | 服务端口（默认 8787） |
 | `DB_PATH` | sqlite 路径（默认 `./data/subforge.sqlite`） |
-| `ADMIN_TOKEN` | 管理接口口令（Bearer / `X-Admin-Token`）。**强烈建议设置**：未设时管理接口默认锁定（返回 503） |
-| `SUBFORGE_ALLOW_NO_AUTH` | 设为 `1` 时，允许在未设 `ADMIN_TOKEN` 的情况下无鉴权提供管理接口（仅限本地自用，切勿暴露公网） |
+| `ADMIN_TOKEN` | （遗留）旧管理口令，仅剩升级保护用途：环境仍设有它时，首次创建账号需先验证它，防止存量公网实例被抢注。建号后可移除 |
+| `SUBFORGE_ALLOW_NO_AUTH` | 设为 `1` 时跳过登录鉴权，无鉴权提供管理接口（仅限本地自用，切勿暴露公网） |
 | `SETTINGS_KEY` | 加密数据库里密钥字段（模型 API Key、MCP 口令）的主密钥。未设时密钥存不进去，Agent 与远端 MCP 保持关闭 |
 
 环境变量只管**引导配置**。模型、联网工具、远端 MCP 口令属于**运行时设置**，存在数据库里、
@@ -82,7 +83,7 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 > OpenRouter 那套是由网关服务端执行的，**只有当模型 Base URL 指向 OpenRouter 时才生效**；
 > 换成直连 OpenAI 或本地模型请用 Tavily / Exa——那两个由本实例自己调用，与模型供应商无关。
 
-> 安全说明：管理接口默认**失败关闭**——既未设 `ADMIN_TOKEN` 也未设 `SUBFORGE_ALLOW_NO_AUTH=1` 时，`/api/*` 一律返回 503（分享出口 `/sub/:token` 不受影响，仍公开）。远端 MCP 使用独立的口令，不受无鉴权模式影响。密钥在库里是 AES-GCM 密文，解不开（没配 `SETTINGS_KEY`、或换过）一律按未配置处理。抓取订阅 URL 时会做 SSRF 防护，拒绝 `localhost`/内网/`169.254.169.254`(云元数据) 等地址；模型 Base URL 不在此限，以便接本地大模型。
+> 安全说明：管理界面用**账号密码登录**（首次访问引导创建，30 天 Cookie 会话，设置页可改密码；忘记密码时删掉数据库 `kv` 表的 `auth` 行重走向导）。脚本/自动化调 `/api/*` 时先 `POST /api/auth/login` 换 token，再走 `Authorization: Bearer`。未初始化账号且未设 `SUBFORGE_ALLOW_NO_AUTH=1` 时，`/api/*` 一律返回 401（分享出口 `/sub/:token` 不受影响，仍公开）。远端 MCP 使用独立的口令，不受无鉴权模式影响。密钥在库里是 AES-GCM 密文，解不开（没配 `SETTINGS_KEY`、或换过）一律按未配置处理。抓取订阅 URL 时会做 SSRF 防护，拒绝 `localhost`/内网/`169.254.169.254`(云元数据) 等地址；模型 Base URL 不在此限，以便接本地大模型。
 
 ## 用 Claude Code / Codex 驱动（MCP）
 

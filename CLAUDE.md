@@ -95,7 +95,7 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 
 `PUT /api/settings` 的密钥字段是三态：**字段缺席**=保持不变、**字符串**=设为新值、**null**=清除。前端拿不到明文，只有这样才能在不重填密钥的前提下改其它字段。`GET` 只回 `{ configured, hint }` 掩码。
 
-**设置刻意不进 `tools/registry.ts`**：模型不该能读写自己的 API key，MCP 侧的外部 agent 更不该。只经受 `ADMIN_TOKEN` 保护的 `/api/settings*` 端点访问。
+**设置刻意不进 `tools/registry.ts`**：模型不该能读写自己的 API key，MCP 侧的外部 agent 更不该。只经受登录会话保护的 `/api/settings*` 端点访问。
 
 ### 脚本两种模式（自动识别）
 
@@ -124,11 +124,11 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 
 ### 鉴权与安全
 
-管理接口**失败关闭**：设了 `ADMIN_TOKEN` 则校验；未设且未显式 `SUBFORGE_ALLOW_NO_AUTH=1` 时 `/api/*` 一律 503。分享出口 `/sub/:token` 始终公开，不受影响。
+管理接口用**单账号 + Cookie 会话**（`auth.ts`）：账号与会话存 kv 表 `auth` 键，密码 PBKDF2-SHA256（WebCrypto，边缘可移植），会话 30 天、库里只存 token 哈希。未初始化时 `/api/*` 返回 401 + `needsSetup`，前端引导「创建管理员账号」。脚本/自动化用 `POST /api/auth/login` 换 token 后走 `Authorization: Bearer`。`SUBFORGE_ALLOW_NO_AUTH=1` 仍是本地无鉴权逃生门（此模式下 auth/status 直接放行，不弹门页）。`ADMIN_TOKEN` 只剩升级保护用途：环境里仍设有它时，初始化账号必须先验旧口令（防存量公网实例被抢注），建号后可移除。分享出口 `/sub/:token` 始终公开，不受影响。
 
 抓取订阅 URL 前必须过 `net.ts::assertPublicHttpUrl`（SSRF 防护：拒绝 localhost / 私网 / `169.254.169.254` 等）。任何新增的「抓取用户提供的 URL」的代码都要走这个函数。
 
-**例外：模型 Base URL 不做私网校验**（`agent/probe.ts` 与 AI SDK 的请求）。本地大模型（Ollama / LM Studio 的 `http://localhost:11434/v1`）是自托管的一等场景，而这条路径在 `ADMIN_TOKEN` 之后——能调它的人已经能跑脚本了，拦私网只会挡掉正常用法。只校验必须是 http(s)。
+**例外：模型 Base URL 不做私网校验**（`agent/probe.ts` 与 AI SDK 的请求）。本地大模型（Ollama / LM Studio 的 `http://localhost:11434/v1`）是自托管的一等场景，而这条路径在登录鉴权之后——能调它的人已经能跑脚本了，拦私网只会挡掉正常用法。只校验必须是 http(s)。
 
 注意 `NodeVmRunner` 不是强安全边界（`node:vm`），仅适用于单人自用；QuickJS（边缘）才是真隔离。
 
@@ -138,7 +138,7 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 - **QuickJS wasm 必须内联进 worker**：workerd 禁止运行时从字节编译 wasm。`scripts/copy-quickjs-wasm.mjs` 把 `.wasm` 拷到 `src/quickjs.wasm`（gitignored，属生成物），`worker.ts` 以 `CompiledWasm` 形式 import 并通过 `newVariant(releaseSyncVariant, { wasmModule })` 注入。不要改回运行时加载。
 - `QuickJsRunner` 实例放在 **worker 模块作用域**（非 `fetch` 内），让 WASM 模块在同一 isolate 内跨请求复用。
 - 本仓库开发宿主 glibc 2.31 跑不了 workerd；需要 `wrangler dev` 时在 `node:22-bookworm` 容器内跑（见 `docs/DEPLOY_CLOUDFLARE.md`）。
-- `wrangler deploy` 会覆盖不在配置里的环境变量。Agent 的 `OPENAI_*` 与 `ADMIN_TOKEN` 要用 `wrangler secret put` 设置（secret 才能在重新部署后留存），不要在 dashboard 里设成明文 Variables。
+- `wrangler deploy` 会覆盖不在配置里的环境变量。`SETTINGS_KEY`（以及升级保护期间的 `ADMIN_TOKEN`）要用 `wrangler secret put` 设置（secret 才能在重新部署后留存），不要在 dashboard 里设成明文 Variables。管理鉴权已改为账号登录，`ADMIN_TOKEN` 建号后可删。
 
 ## 前端
 
