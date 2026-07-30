@@ -7,7 +7,7 @@ import { nodeToMihomo } from './renderers/mihomo.js'
 import { applyOperations, expandRegionGroups } from './preprocess.js'
 import type { ScriptRunner } from './script/runner.js'
 import { isOverrideScript } from './script/types.js'
-import { uniquifyNames } from './script/utils.js'
+import { sanitizeNodeNames, uniquifyNames } from './script/utils.js'
 
 export interface PipelineInput {
   /** 已抓取的订阅原文（每项一份订阅内容） */
@@ -45,7 +45,9 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineOutput>
 
   // 先执行声明式节点操作（可视化编辑器产出）
   let nodes = input.profile.operations?.length ? applyOperations(parsed, input.profile.operations) : parsed
-  nodes = uniquifyNames(nodes)
+  // 先清洗（剥掉换行/控制字符，挡住渲染期的配置注入）再去重：
+  // 清洗可能让原本不同的名字变得相同，顺序反了就会漏掉重名。
+  nodes = uniquifyNames(sanitizeNodeNames(nodes))
   const logs: string[] = []
   const script = input.script?.trim()
 
@@ -67,7 +69,8 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineOutput>
     const result = await input.runner.run(script, nodes, input.scriptParams)
     logs.push(...result.logs)
     if (!result.ok) throw new Error(`脚本执行失败: ${result.error}`)
-    nodes = uniquifyNames(result.nodes)
+    // 脚本可以任意改名，改完仍要再清洗一次——不可信输入也可能经脚本流回名称。
+    nodes = uniquifyNames(sanitizeNodeNames(result.nodes))
   }
 
   const renderer = getRenderer(input.target)
