@@ -8,6 +8,7 @@ import {
   addSession,
   hasValidSession,
   hashPassword,
+  loginThrottleKey,
   loadAuthState,
   revokeSession,
   saveAuthState,
@@ -54,6 +55,8 @@ export interface AppDeps {
   checkNodes?: NodeChecker
   /** 由入口自述当前跑在哪套实现上，供设置页的诊断卡展示 */
   runtimeInfo?: RuntimeInfo
+  /** 由运行时提供真实对端 IP；Node 入口从 socket 读取，Workers 回退到 CF-Connecting-IP。 */
+  getClientIp?: (c: Context) => string | undefined
 }
 
 /** 运行时能力（运行时 / 存储 / 沙箱）的只读自述，给设置页的诊断卡用。 */
@@ -132,10 +135,12 @@ export function createApp(deps: AppDeps): Hono {
       maxAge: Math.floor(SESSION_TTL_MS / 1000),
       secure: new URL(c.req.url).protocol === 'https:',
     })
-
-  // 登录失败节流（进程内计数；Workers 多 isolate 下不完美，底线是 PBKDF2 慢哈希）
-  let loginFailures = 0
-  let loginLockedUntil = 0
+  const clientIpOf = (c: Context) =>
+    deps.getClientIp?.(c)?.trim() || c.req.header('CF-Connecting-IP')?.trim() || 'unknown'
+  const throttled = (c: Context, lockedUntil: number, at: number) => {
+    c.header('Retry-After', String(Math.max(1, Math.ceil((lockedUntil - at) / 1000))))
+    return c.json({ error: '尝试过于频繁，请稍后再试' }, 429)
+  }
 
   const api = new Hono()
   if (config.allowNoAuth) {
@@ -157,7 +162,7 @@ export function createApp(deps: AppDeps): Hono {
   api.get('/auth/status', async (c) => {
     // 无鉴权模式下不存在账号概念，直接放行，前端不弹建号/登录门
     if (config.allowNoAuth) {
-      return c.json({ initialized: true, authenticated: true, legacyTokenRequired: false })
+      return c.json({ initialized: true, authenticated: true })
     }
     const state = await loadAuthState(storage)
     const token = sessionTokenOf(c)
@@ -166,8 +171,6 @@ export function createApp(deps: AppDeps): Hono {
       initialized: !!state.account,
       authenticated,
       username: authenticated ? state.account?.username : undefined,
-      // 升级保护：存量部署环境仍设有 ADMIN_TOKEN 时，初始化需先验旧口令（防公网实例被抢注）
-      legacyTokenRequired: !state.account && !!config.adminToken,
     })
   })
 
@@ -178,34 +181,33 @@ export function createApp(deps: AppDeps): Hono {
     if (!username || password.length < 8) return c.json({ error: '用户名不能为空，密码至少 8 位' }, 400)
     const state = await loadAuthState(storage)
     if (state.account) return c.json({ error: '账号已存在' }, 409)
-    if (config.adminToken && !(await timingSafeEqual(String(body.legacyToken ?? ''), config.adminToken))) {
-      return c.json({ error: '需要正确的 ADMIN_TOKEN 才能初始化账号', legacyTokenRequired: true }, 401)
-    }
     state.account = { username, ...(await hashPassword(password)) }
     const token = await addSession(state, now())
-    await saveAuthState(storage, state)
+    if (!(await storage.createAuthIfUninitialized(JSON.stringify(state)))) {
+      return c.json({ error: '账号已存在或初始化状态已改变' }, 409)
+    }
     setSessionCookie(c, token)
     return c.json({ ok: true, token }, 201)
   })
 
   api.post('/auth/login', async (c) => {
-    if (now() < loginLockedUntil) return c.json({ error: '尝试过于频繁，请稍后再试' }, 429)
     const body = (await c.req.json().catch(() => ({}))) as Record<string, unknown>
     const state = await loadAuthState(storage)
     if (!state.account) return c.json({ error: '尚未初始化管理员账号', needsSetup: true }, 401)
-    const ok =
-      (await timingSafeEqual(String(body.username ?? ''), state.account.username)) &&
-      (await verifyPassword(String(body.password ?? ''), state.account))
+    const at = now()
+    const throttleKey = await loginThrottleKey(state.account.username, clientIpOf(c))
+    const throttle = await storage.getLoginThrottle(throttleKey)
+    if (throttle && at < throttle.lockedUntil) return throttled(c, throttle.lockedUntil, at)
+
+    const usernameOk = await timingSafeEqual(String(body.username ?? ''), state.account.username)
+    const passwordOk = await verifyPassword(String(body.password ?? ''), state.account)
+    const ok = usernameOk && passwordOk
     if (!ok) {
-      loginFailures += 1
-      if (loginFailures >= 5) {
-        loginFailures = 0
-        loginLockedUntil = now() + 30_000
-      }
+      const next = await storage.recordLoginFailure(throttleKey, at)
+      if (next.lockedUntil > at) return throttled(c, next.lockedUntil, at)
       return c.json({ error: '用户名或密码错误' }, 401)
     }
-    loginFailures = 0
-    loginLockedUntil = 0
+    await storage.clearLoginThrottle(throttleKey)
     const token = await addSession(state, now())
     await saveAuthState(storage, state)
     setSessionCookie(c, token)
@@ -257,7 +259,7 @@ export function createApp(deps: AppDeps): Hono {
 
   // ---- 运行时设置 ----
   // 刻意不进 tools/registry.ts：模型不该能读写自己的 API key，
-  // MCP 那侧的外部 agent 更不该。设置只经这几个受 ADMIN_TOKEN 保护的端点。
+  // MCP 那侧的外部 agent 更不该。设置只经受登录会话保护的端点。
   // GET 与 PUT 回同一个形状，前端保存后可直接用返回值刷新界面。
   const settingsView = async () => ({
     ...toSettingsView(await settingsOf(), !!config.settingsKey),

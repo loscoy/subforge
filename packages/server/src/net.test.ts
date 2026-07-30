@@ -15,9 +15,13 @@ describe('SSRF 防护 assertPublicHttpUrl', () => {
 
   it('拒绝 localhost 与本机', () => {
     expect(() => assertPublicHttpUrl('http://localhost/sub')).toThrow()
+    expect(() => assertPublicHttpUrl('http://localhost./sub')).toThrow()
     expect(() => assertPublicHttpUrl('http://foo.localhost/sub')).toThrow()
     expect(() => assertPublicHttpUrl('http://127.0.0.1:8787/x')).toThrow()
+    expect(() => assertPublicHttpUrl('http://2130706433/x')).toThrow()
+    expect(() => assertPublicHttpUrl('http://0x7f000001/x')).toThrow()
     expect(() => assertPublicHttpUrl('http://[::1]/x')).toThrow()
+    expect(() => assertPublicHttpUrl('http://[::ffff:7f00:1]/x')).toThrow()
   })
 
   it('拒绝私网与云元数据地址', () => {
@@ -30,12 +34,15 @@ describe('SSRF 防护 assertPublicHttpUrl', () => {
 
   it('拒绝非法 URL', () => {
     expect(() => assertPublicHttpUrl('not a url')).toThrow()
+    expect(() => assertPublicHttpUrl('https://user:pass@sub.example.com/x')).toThrow()
   })
 
   it('IPv4/IPv6 私网判断', () => {
     expect(isPrivateIpv4('172.15.0.1')).toBe(false) // 172.16-31 才是私网
     expect(isPrivateIpv4('172.20.0.1')).toBe(true)
     expect(isPrivateIpv4('8.8.8.8')).toBe(false)
+    expect(isPrivateIpv4('198.51.1.1')).toBe(false)
+    expect(isPrivateIpv4('203.0.114.1')).toBe(false)
     expect(isPrivateIpv6('fd00::1')).toBe(true)
     expect(isPrivateIpv6('fe80::1')).toBe(true)
     expect(isPrivateIpv6('2606:4700::1')).toBe(false)

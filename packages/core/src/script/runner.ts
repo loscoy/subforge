@@ -2,7 +2,7 @@ import type { ProxyNode } from '../model.js'
 import type { OverrideResult, ScriptResult } from './types.js'
 
 /**
- * 脚本执行器接口（实现放在 server：Node 用 node:vm，serverless 用 QuickJS-wasm）。
+ * 脚本执行器接口（实现放在 server：Node 与 serverless 都使用 QuickJS-wasm）。
  * core 只依赖接口，保证运行时无关。
  */
 export interface ScriptRunner {

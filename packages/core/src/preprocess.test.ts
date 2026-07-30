@@ -25,6 +25,18 @@ describe('applyOperations', () => {
     const out = applyOperations(nodes, [{ op: 'keep', pattern: 'HK' }])
     expect(out.every((n) => n.name.includes('HK'))).toBe(true)
   })
+
+  it('病态筛选与重命名正则在线性时间内完成', () => {
+    const long = makeNode({ name: `${'a'.repeat(50_000)}!`, type: 'trojan', server: 'x', port: 1 })
+    expect(applyOperations([long], [{ op: 'keep', pattern: '(a+)+$' }])).toEqual([])
+    expect(applyOperations([long], [{ op: 'rename', from: '(a+)+$', to: 'x' }])[0]!.name).toBe(long.name)
+  })
+
+  it('保留捕获组替换语义，并明确拒绝 RE2 不支持的回溯语法', () => {
+    const renamed = applyOperations(nodes.slice(0, 1), [{ op: 'rename', from: '(HK) (\\d+)', to: '$1-$2' }])
+    expect(renamed[0]!.name).toContain('HK-01')
+    expect(() => applyOperations(nodes, [{ op: 'keep', pattern: '(HK)\\1' }])).toThrow('正则表达式不受支持')
+  })
 })
 
 describe('expandRegionGroups', () => {

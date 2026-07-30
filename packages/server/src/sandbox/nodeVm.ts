@@ -1,119 +1,28 @@
-import vm from 'node:vm'
-import { scriptUtils, type OverrideResult, type ProxyNode, type ScriptResult, type ScriptRunner } from '@subforge/core'
-
-const DEFAULT_TIMEOUT_MS = 3000
+import type { OverrideResult, ProxyNode, ScriptResult, ScriptRunner } from '@subforge/core'
+import { QuickJsRunner } from './quickjs.js'
 
 /**
- * 基于 node:vm 的脚本执行器。
+ * 兼容旧导入名的 Node 脚本执行器。
  *
- * 隔离级别：脚本在一个裸 context 中运行，无法访问外层作用域、`process`、`require`、
- * `globalThis` 上的 Node API——只能看到我们显式注入的 nodes / utils / console / params。
- * 同步无限循环由 vm 的 `timeout` 中断；异步挂起由 Promise.race 兜底。
- *
- * 注意：node:vm 不是强安全边界。面向「单部署者自用」足够；若要执行不可信第三方脚本，
- * 换 isolated-vm（Node）或 QuickJS-wasm（serverless）实现同一 ScriptRunner 接口即可。
+ * 实际执行统一委托给 QuickJS-WASM：脚本与宿主进程不共享 realm，且运行时有 CPU、
+ * 内存和栈上限。保留类名是为了兼容现有调用方；新代码应直接使用 QuickJsRunner。
  */
 export class NodeVmRunner implements ScriptRunner {
-  constructor(private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS) {}
+  private readonly runner: QuickJsRunner
 
-  async run(code: string, nodes: ProxyNode[], params: Record<string, string> = {}): Promise<ScriptResult> {
-    const start = performance.now()
-    const logs: string[] = []
-    const capture =
-      (level: string) =>
-      (...args: unknown[]) => {
-        logs.push(`[${level}] ${args.map(fmt).join(' ')}`)
-      }
-    const sandboxConsole = { log: capture('log'), warn: capture('warn'), error: capture('error') }
-
-    // 深拷贝输入，隔离脚本对原数组的副作用
-    const input: ProxyNode[] = structuredClone(nodes)
-
-    const context = vm.createContext({
-      nodes: input,
-      utils: scriptUtils,
-      console: sandboxConsole,
-      params,
-      structuredClone,
-      // 常用只读全局
-      JSON,
-      Math,
-      Object,
-      Array,
-      String,
-      Number,
-      Boolean,
-      RegExp,
-      Date,
-      Map,
-      Set,
-    })
-
-    try {
-      // 包成 async 函数体，允许 await 与 return
-      const wrapped = `(async () => {\n${code}\n})()`
-      const script = new vm.Script(wrapped, { filename: 'user-script.js' })
-      const resultPromise: Promise<unknown> = script.runInContext(context, { timeout: this.timeoutMs })
-
-      const timeout = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error(`脚本执行超时（>${this.timeoutMs}ms）`)), this.timeoutMs),
-      )
-      const returned = await Promise.race([resultPromise, timeout])
-
-      // 脚本可 return 新数组；未 return 则采用被就地修改的 input
-      const out = Array.isArray(returned) ? (returned as ProxyNode[]) : input
-      if (!Array.isArray(out)) throw new Error('脚本必须返回 ProxyNode 数组或不返回')
-
-      return { ok: true, nodes: out, logs, durationMs: performance.now() - start }
-    } catch (err) {
-      return {
-        ok: false,
-        nodes,
-        logs,
-        error: err instanceof Error ? err.message : String(err),
-        durationMs: performance.now() - start,
-      }
-    }
+  constructor(timeoutMs = 3000) {
+    this.runner = new QuickJsRunner(undefined, { timeoutMs })
   }
 
-  async runOverride(
+  run(code: string, nodes: ProxyNode[], params: Record<string, string> = {}): Promise<ScriptResult> {
+    return this.runner.run(code, nodes, params)
+  }
+
+  runOverride(
     code: string,
     config: Record<string, unknown>,
     params: Record<string, string> = {},
   ): Promise<OverrideResult> {
-    const start = performance.now()
-    const logs: string[] = []
-    const capture =
-      (level: string) =>
-      (...args: unknown[]) => {
-        logs.push(`[${level}] ${args.map(fmt).join(' ')}`)
-      }
-    const context = vm.createContext({
-      $arguments: params,
-      __config: structuredClone(config),
-      console: { log: capture('log'), warn: capture('warn'), error: capture('error') },
-      structuredClone,
-      JSON, Math, Object, Array, String, Number, Boolean, RegExp, Date, Map, Set,
-    })
-    try {
-      const wrapped = `(function(){\n${code}\n;\nreturn (typeof main === 'function') ? main(__config) : undefined;\n})()`
-      const script = new vm.Script(wrapped, { filename: 'override-script.js' })
-      const returned = script.runInContext(context, { timeout: this.timeoutMs * 2 })
-      if (!returned || typeof returned !== 'object') {
-        return { ok: false, logs, error: 'main(config) 未返回配置对象', durationMs: performance.now() - start }
-      }
-      return { ok: true, config: structuredClone(returned) as Record<string, unknown>, logs, durationMs: performance.now() - start }
-    } catch (err) {
-      return { ok: false, logs, error: err instanceof Error ? err.message : String(err), durationMs: performance.now() - start }
-    }
-  }
-}
-
-function fmt(v: unknown): string {
-  if (typeof v === 'string') return v
-  try {
-    return JSON.stringify(v)
-  } catch {
-    return String(v)
+    return this.runner.runOverride(code, config, params)
   }
 }

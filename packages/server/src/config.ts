@@ -8,8 +8,6 @@
 export interface ServerConfig {
   port: number
   dbPath: string
-  /** （遗留）旧管理口令。仅剩一个用途：初始化账号时的升级保护校验，建号后可从环境移除。 */
-  adminToken?: string
   /** 是否允许无鉴权提供管理接口（跳过账号会话校验）。默认 false（失败关闭），需显式开启。 */
   allowNoAuth?: boolean
   /** 加密数据库里密钥字段的主密钥。未设则密钥无法存取，Agent 与远端 MCP 失败关闭。 */
@@ -23,7 +21,6 @@ export function getConfig(): ServerConfig {
   return {
     port: Number(env.PORT ?? 8787),
     dbPath: env.DB_PATH ?? './data/subforge.sqlite',
-    adminToken: env.ADMIN_TOKEN || undefined,
     allowNoAuth: env.SUBFORGE_ALLOW_NO_AUTH === '1',
     settingsKey: env.SETTINGS_KEY || undefined,
     webDir: env.WEB_DIR || undefined,

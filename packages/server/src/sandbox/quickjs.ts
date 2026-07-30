@@ -1,9 +1,14 @@
 import browserVariant from '@jitl/quickjs-singlefile-browser-release-sync'
-import { newQuickJSWASMModuleFromVariant, type QuickJSWASMModule } from 'quickjs-emscripten-core'
+import {
+  newQuickJSWASMModuleFromVariant,
+  shouldInterruptAfterDeadline,
+  type QuickJSContext,
+  type QuickJSWASMModule,
+} from 'quickjs-emscripten-core'
 import { scriptUtils, type OverrideResult, type ProxyNode, type ScriptResult, type ScriptRunner } from '@subforge/core'
 
 /**
- * 基于 QuickJS-wasm 的脚本执行器，用于无 node:vm 的运行时（Cloudflare Workers 等）。
+ * 基于 QuickJS-wasm 的脚本执行器，供 Node 与 Cloudflare Workers 共用。
  *
  * 通过 host 桥把真实的 `scriptUtils` 注入 isolate，避免逻辑重复。仅支持**同步**脚本。
  *
@@ -14,27 +19,53 @@ import { scriptUtils, type OverrideResult, type ProxyNode, type ScriptResult, ty
  */
 export type QuickJsModuleProvider = () => Promise<QuickJSWASMModule>
 
+export interface QuickJsRunnerOptions {
+  timeoutMs?: number
+  memoryLimitBytes?: number
+}
+
 const defaultProvider: QuickJsModuleProvider = () => newQuickJSWASMModuleFromVariant(browserVariant)
+const DEFAULT_TIMEOUT_MS = 3000
+const DEFAULT_MEMORY_LIMIT_BYTES = 64 * 1024 * 1024
 
 export class QuickJsRunner implements ScriptRunner {
   private modulePromise?: Promise<QuickJSWASMModule>
-  constructor(private readonly provider: QuickJsModuleProvider = defaultProvider) {}
+  private readonly timeoutMs: number
+  private readonly memoryLimitBytes: number
+
+  constructor(
+    private readonly provider: QuickJsModuleProvider = defaultProvider,
+    options: QuickJsRunnerOptions = {},
+  ) {
+    this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
+    this.memoryLimitBytes = options.memoryLimitBytes ?? DEFAULT_MEMORY_LIMIT_BYTES
+  }
 
   private getModule(): Promise<QuickJSWASMModule> {
     return (this.modulePromise ??= this.provider())
+  }
+
+  private newContext(QuickJS: QuickJSWASMModule, timeoutMs: number): QuickJSContext {
+    const ctx = QuickJS.newContext()
+    ctx.runtime.setMemoryLimit(this.memoryLimitBytes)
+    ctx.runtime.setMaxStackSize(1024 * 1024)
+    ctx.runtime.setInterruptHandler(shouldInterruptAfterDeadline(Date.now() + timeoutMs))
+    return ctx
   }
 
   async run(code: string, nodes: ProxyNode[], params: Record<string, string> = {}): Promise<ScriptResult> {
     const start = Date.now()
     const logs: string[] = []
     const QuickJS = await this.getModule()
-    const ctx = QuickJS.newContext()
+    const ctx = this.newContext(QuickJS, this.timeoutMs)
     try {
       // host: __util(name, argsJson) → JSON(result)
       const utilFn = ctx.newFunction('__util', (nameH, argsH) => {
         const name = ctx.getString(nameH)
         const args = JSON.parse(ctx.getString(argsH)) as unknown[]
-        const fn = (scriptUtils as Record<string, (...a: unknown[]) => unknown>)[name]
+        const fn = Object.hasOwn(scriptUtils, name)
+          ? (scriptUtils as Record<string, (...a: unknown[]) => unknown>)[name]
+          : undefined
         if (!fn) throw new Error(`未知 utils.${name}`)
         const result = fn(...args)
         return ctx.newString(JSON.stringify(result ?? null))
@@ -71,6 +102,7 @@ export class QuickJsRunner implements ScriptRunner {
   const utils = new Proxy({}, { get: (_t, p) => (...args) => JSON.parse(__util(String(p), JSON.stringify(args))) });
   const __run = () => { ${code}\n };
   const out = __run();
+  if (out && typeof out.then === 'function') throw new Error('脚本仅支持同步执行');
   return JSON.stringify(Array.isArray(out) ? out : nodes);
 })()`
 
@@ -82,7 +114,7 @@ export class QuickJsRunner implements ScriptRunner {
           ok: false,
           nodes,
           logs,
-          error: typeof err === 'object' && err && 'message' in err ? String((err as any).message) : String(err),
+          error: quickJsError(err, this.timeoutMs),
           durationMs: Date.now() - start,
         }
       }
@@ -105,7 +137,8 @@ export class QuickJsRunner implements ScriptRunner {
     const start = Date.now()
     const logs: string[] = []
     const QuickJS = await this.getModule()
-    const ctx = QuickJS.newContext()
+    const timeoutMs = this.timeoutMs * 2
+    const ctx = this.newContext(QuickJS, timeoutMs)
     try {
       const logFn = ctx.newFunction('__log', (levelH, argsH) => {
         const level = ctx.getString(levelH)
@@ -133,6 +166,7 @@ export class QuickJsRunner implements ScriptRunner {
   };
   ${code}
   var __out = (typeof main === 'function') ? main(__config) : undefined;
+  if (__out && typeof __out.then === 'function') throw new Error('脚本仅支持同步执行');
   return JSON.stringify(__out === undefined ? null : __out);
 })()`
 
@@ -143,7 +177,7 @@ export class QuickJsRunner implements ScriptRunner {
         return {
           ok: false,
           logs,
-          error: typeof err === 'object' && err && 'message' in err ? String((err as any).message) : String(err),
+          error: quickJsError(err, timeoutMs),
           durationMs: Date.now() - start,
         }
       }
@@ -160,4 +194,11 @@ export class QuickJsRunner implements ScriptRunner {
       ctx.dispose()
     }
   }
+}
+
+function quickJsError(err: unknown, timeoutMs: number): string {
+  const message = typeof err === 'object' && err && 'message' in err ? String((err as { message: unknown }).message) : String(err)
+  if (message.toLowerCase().includes('interrupted')) return `脚本执行超时（>${timeoutMs}ms）`
+  if (message.toLowerCase().includes('out of memory')) return '脚本内存超限'
+  return message
 }

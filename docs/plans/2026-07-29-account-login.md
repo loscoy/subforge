@@ -1,5 +1,7 @@
 # 账号密码登录 Implementation Plan
 
+> 历史计划：后续实现已完全移除 `ADMIN_TOKEN`，本文保留当时的执行记录。
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 用「单账号 + Cookie 会话」完全替代 `ADMIN_TOKEN` 管理鉴权，首次访问走设置向导，会话 30 天。

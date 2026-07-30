@@ -110,6 +110,11 @@ export interface StoredTemplate {
   updatedAt: number
 }
 
+export interface LoginThrottle {
+  failures: number
+  lockedUntil: number
+}
+
 /**
  * Storage 抽象（异步）：Node 用 sqlite、测试用内存、serverless 用 D1/KV。
  * 全部方法返回 Promise，以兼容 Cloudflare D1/KV 这类异步存储。
@@ -164,6 +169,13 @@ export interface Storage {
   // 账号与会话（原始 JSON 字符串）。语义在 auth.ts，存储层视为不透明数据。
   getAuth(): Promise<string | undefined>
   setAuth(json: string): Promise<void>
+  /** 仅在 auth 不存在或尚无 account 时写入；用于消除首次建号的并发覆盖。 */
+  createAuthIfUninitialized(json: string): Promise<boolean>
+
+  // 登录失败退避。key 已由 auth.ts 哈希，存储层只负责跨实例原子计数。
+  getLoginThrottle(key: string): Promise<LoginThrottle | undefined>
+  recordLoginFailure(key: string, at: number): Promise<LoginThrottle>
+  clearLoginThrottle(key: string): Promise<void>
 
   close(): Promise<void>
 }

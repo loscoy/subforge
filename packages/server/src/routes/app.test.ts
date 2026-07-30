@@ -102,8 +102,8 @@ describe('HTTP app', () => {
 
 describe('管理接口鉴权（账号会话，失败关闭）', () => {
   const mk = (config: Parameters<typeof createApp>[0]['config']) =>
-    createApp({ storage: new InMemoryStorage(), runner: new NodeVmRunner(), config })
-  const base = { ...getConfig(), adminToken: undefined, allowNoAuth: false }
+    createApp({ storage: new InMemoryStorage(), runner: new NodeVmRunner(), config, getClientIp: () => '127.0.0.1' })
+  const base = { ...getConfig(), allowNoAuth: false }
 
   it('未初始化账号 → /api 返回 401 且 needsSetup', async () => {
     const app = mk(base)
@@ -141,7 +141,7 @@ describe('管理接口鉴权（账号会话，失败关闭）', () => {
 })
 
 describe('远端 MCP', () => {
-  const base = { ...getConfig(), adminToken: undefined, allowNoAuth: true }
+  const base = { ...getConfig(), allowNoAuth: true }
   const json = (res: Response) => res.json() as Promise<any>
   const mcpRequest = (body: unknown, token?: string) =>
     new Request('http://x/mcp', {
@@ -263,7 +263,7 @@ describe('远端 MCP', () => {
 
 describe('运行时设置端点', () => {
   const MASTER_KEY = 'test-master-key'
-  const base = { ...getConfig(), adminToken: undefined, allowNoAuth: true }
+  const base = { ...getConfig(), allowNoAuth: true }
   // 不给 settingsKey 设默认值：显式传入的 undefined 会被默认参数吃掉，
   // 「未配置主密钥」这条用例就会静默失效（同 AgentChatPanel 的 height 坑）。
   const mk = (settingsKey: string | undefined) => {
@@ -321,10 +321,10 @@ describe('运行时设置端点', () => {
       runner: new NodeVmRunner(),
       config: { ...base, settingsKey: MASTER_KEY },
       checkNodes: async () => [],
-      runtimeInfo: { runtime: 'node', storage: 'sqlite', sandbox: 'node:vm' },
+      runtimeInfo: { runtime: 'node', storage: 'sqlite', sandbox: 'quickjs-wasm' },
     })
     const view = await read(await app.fetch(new Request('http://x/api/settings')))
-    expect(view.diagnostics).toMatchObject({ runtime: 'node', storage: 'sqlite', sandbox: 'node:vm', healthcheck: true })
+    expect(view.diagnostics).toMatchObject({ runtime: 'node', storage: 'sqlite', sandbox: 'quickjs-wasm', healthcheck: true })
     expect(view.diagnostics.renderers.length).toBeGreaterThan(0)
   })
 })

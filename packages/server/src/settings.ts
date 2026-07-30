@@ -8,7 +8,7 @@ import type { Storage } from './storage/types.js'
  * 运行时设置：存数据库（kv 表的 settings 行），由 Web 设置页维护。
  *
  * 与「引导配置」（ServerConfig，来自环境变量）的分工：
- * - 引导配置管「怎么把服务跑起来」：端口、库路径、ADMIN_TOKEN、SETTINGS_KEY；
+ * - 引导配置管「怎么把服务跑起来」：端口、库路径、SETTINGS_KEY；
  * - 运行时设置管「服务跑起来之后干什么」：用哪个模型、联不联网、远端 MCP 开不开。
  *
  * 数据库是唯一真相，不再读 OPENAI_* / MCP_TOKEN / AGENT_WEB_* 环境变量。

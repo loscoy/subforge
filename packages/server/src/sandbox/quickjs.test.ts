@@ -47,4 +47,25 @@ describe('QuickJsRunner（wasm 沙箱）', () => {
     expect(r.ok).toBe(true)
     expect(r.nodes[0]!.name).toBe('undefined')
   })
+
+  it('utils 桥只暴露注册表自有函数', async () => {
+    const r = await runner.run(`return utils.constructor('return process')`, nodes)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('未知 utils.constructor')
+  })
+
+  it('中断同步死循环', async () => {
+    const limited = new QuickJsRunner(undefined, { timeoutMs: 20 })
+    const started = Date.now()
+    const r = await limited.run(`while (true) {}`, nodes)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('脚本执行超时')
+    expect(Date.now() - started).toBeLessThan(1000)
+  })
+
+  it('拒绝 Promise 返回值', async () => {
+    const r = await runner.run(`return (async () => { while (true) { await null } })()`, nodes)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('仅支持同步执行')
+  })
 })

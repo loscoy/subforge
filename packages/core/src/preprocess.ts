@@ -1,5 +1,6 @@
 import type { NodeOp, ProxyGroupDef } from './config.js'
 import type { ProxyNode } from './model.js'
+import { compileLinearRegex } from './safeRegex.js'
 import { dedupe, drop, emojiOf, keep, regionOf, tagRegions } from './script/utils.js'
 
 /** 按顺序执行声明式节点操作。 */
@@ -24,8 +25,8 @@ export function applyOperations(nodes: ProxyNode[], ops: NodeOp[]): ProxyNode[] 
         break
       case 'rename':
         if (op.from) {
-          const re = new RegExp(op.from, 'g')
-          ns = ns.map((n) => ({ ...n, name: n.name.replace(re, op.to) }))
+          const re = compileLinearRegex(op.from)
+          ns = ns.map((n) => ({ ...n, name: re.replaceAll(n.name, op.to) }))
         }
         break
     }

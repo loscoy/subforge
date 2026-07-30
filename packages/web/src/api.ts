@@ -32,12 +32,11 @@ export interface AuthStatus {
   initialized: boolean
   authenticated: boolean
   username?: string
-  legacyTokenRequired: boolean
 }
 
 export const authApi = {
   status: () => req<AuthStatus>('/auth/status'),
-  setup: (b: { username: string; password: string; legacyToken?: string }) =>
+  setup: (b: { username: string; password: string }) =>
     req<{ ok: boolean }>('/auth/setup', { method: 'POST', body: JSON.stringify(b) }),
   login: (b: { username: string; password: string }) =>
     req<{ ok: boolean }>('/auth/login', { method: 'POST', body: JSON.stringify(b) }),

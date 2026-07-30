@@ -14,6 +14,16 @@ import { parseUserInfo, type UserInfo } from './userinfo.js'
 import { newId, now } from './util.js'
 
 const DEFAULT_MAX_AGE_MS = 60 * 60 * 1000 // 1h 缓存
+const DEFAULT_FETCH_TIMEOUT_MS = 15_000
+const DEFAULT_MAX_SUBSCRIPTION_BYTES = 5 * 1024 * 1024
+const DEFAULT_MAX_REDIRECTS = 5
+
+export interface FetchSubscriptionOptions {
+  timeoutMs?: number
+  maxBytes?: number
+  maxRedirects?: number
+  fetchImpl?: typeof fetch
+}
 
 /**
  * 新建配置时的默认「空白骨架」：一个可直接构建的最小节点选择组 + 兜底规则。
@@ -28,16 +38,92 @@ export function newDefaultProfile(): ConversionProfile {
 }
 
 /** 抓取订阅内容（带 UA），返回正文与解析出的流量信息。失败抛错。 */
-export async function fetchSubscriptionContent(url: string): Promise<{ content: string; userInfo?: UserInfo }> {
-  assertPublicHttpUrl(url) // SSRF 防护：拒绝 localhost/内网/元数据地址
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'clash-verge/1.0 mihomo subforge' },
-    redirect: 'follow',
-  })
-  if (!res.ok) throw new Error(`抓取订阅失败 HTTP ${res.status}`)
-  const content = await res.text()
-  const userInfo = parseUserInfo(res.headers.get('subscription-userinfo'))
-  return { content, userInfo }
+export async function fetchSubscriptionContent(
+  url: string,
+  options: FetchSubscriptionOptions = {},
+): Promise<{ content: string; userInfo?: UserInfo }> {
+  const timeoutMs = options.timeoutMs ?? DEFAULT_FETCH_TIMEOUT_MS
+  const maxBytes = options.maxBytes ?? DEFAULT_MAX_SUBSCRIPTION_BYTES
+  const maxRedirects = options.maxRedirects ?? DEFAULT_MAX_REDIRECTS
+  const fetchImpl = options.fetchImpl ?? fetch
+  const controller = new AbortController()
+  let timedOut = false
+  const timer = setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+
+  try {
+    let current = assertPublicHttpUrl(url)
+    let redirects = 0
+
+    while (true) {
+      const res = await fetchImpl(current, {
+        headers: { 'User-Agent': 'clash-verge/1.0 mihomo subforge' },
+        redirect: 'manual',
+        signal: controller.signal,
+      })
+
+      if (isRedirect(res.status)) {
+        if (redirects >= maxRedirects) throw new Error(`订阅重定向次数过多（>${maxRedirects}）`)
+        const location = res.headers.get('location')
+        if (!location) throw new Error(`订阅重定向缺少 Location（HTTP ${res.status}）`)
+        await res.body?.cancel().catch(() => undefined)
+        current = assertPublicHttpUrl(new URL(location, current).href)
+        redirects += 1
+        continue
+      }
+
+      if (!res.ok) throw new Error(`抓取订阅失败 HTTP ${res.status}`)
+      const content = await readTextWithLimit(res, maxBytes)
+      const userInfo = parseUserInfo(res.headers.get('subscription-userinfo'))
+      return { content, userInfo }
+    }
+  } catch (error) {
+    if (timedOut) throw new Error(`抓取订阅超时（>${timeoutMs}ms）`)
+    throw error
+  } finally {
+    clearTimeout(timer)
+  }
+}
+
+function isRedirect(status: number): boolean {
+  return status === 301 || status === 302 || status === 303 || status === 307 || status === 308
+}
+
+async function readTextWithLimit(res: Response, maxBytes: number): Promise<string> {
+  const declared = Number(res.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > maxBytes) {
+    await res.body?.cancel().catch(() => undefined)
+    throw new Error(`订阅响应体过大（上限 ${maxBytes} 字节）`)
+  }
+  if (!res.body) return ''
+
+  const reader = res.body.getReader()
+  const chunks: Uint8Array[] = []
+  let total = 0
+  try {
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+      total += value.byteLength
+      if (total > maxBytes) {
+        await reader.cancel()
+        throw new Error(`订阅响应体过大（上限 ${maxBytes} 字节）`)
+      }
+      chunks.push(value)
+    }
+  } finally {
+    reader.releaseLock()
+  }
+
+  const bytes = new Uint8Array(total)
+  let offset = 0
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset)
+    offset += chunk.byteLength
+  }
+  return new TextDecoder().decode(bytes)
 }
 
 /** 确保订阅有较新内容：过期或无缓存则重新抓取并写回。 */

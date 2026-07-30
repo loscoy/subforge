@@ -50,6 +50,21 @@ describe('NodeVmRunner', () => {
     expect(r2.ok).toBe(false)
   })
 
+  it('宿主构造器链无法取回 process', async () => {
+    const r = await runner.run(
+      `nodes[0].name = Object.constructor('return typeof process')(); return nodes`,
+      nodes,
+    )
+    expect(r.ok).toBe(true)
+    expect(r.nodes[0]!.name).toBe('undefined')
+  })
+
+  it('拒绝异步脚本，不留下脱离超时控制的任务', async () => {
+    const r = await runner.run(`return (async () => { while (true) { await null } })()`, nodes)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('仅支持同步执行')
+  })
+
   it('输入不被脚本副作用污染（深拷贝隔离）', async () => {
     await runner.run(`nodes[0].name = 'MUT'`, nodes)
     expect(nodes[0]!.name).toBe('🇭🇰 HK 01')

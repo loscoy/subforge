@@ -1,6 +1,7 @@
 import * as yaml from 'js-yaml'
 import type { ProxyGroupDef, RenderContext } from '../config.js'
 import type { ProxyNode } from '../model.js'
+import { compileLinearRegex } from '../safeRegex.js'
 
 /** 把统一节点转换为 Mihomo proxy 对象。 */
 export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
@@ -97,11 +98,11 @@ export function resolveGroupMembers(group: ProxyGroupDef, nodeNames: string[]): 
   else if (group.filter) pool = [...nodeNames]
 
   if (group.filter) {
-    const re = new RegExp(group.filter)
+    const re = compileLinearRegex(group.filter)
     pool = pool.filter((name) => re.test(name))
   }
   if (group.excludeFilter) {
-    const re = new RegExp(group.excludeFilter)
+    const re = compileLinearRegex(group.excludeFilter)
     pool = pool.filter((name) => !re.test(name))
   }
   members.push(...pool)

@@ -49,6 +49,10 @@ describe('resolveGroupMembers', () => {
   it('空组兜底 DIRECT', () => {
     expect(resolveGroupMembers({ name: 'X', type: 'select', filter: 'NOPE' }, names)).toEqual(['DIRECT'])
   })
+  it('病态 filter 不发生灾难性回溯', () => {
+    const hostile = `${'a'.repeat(50_000)}!`
+    expect(resolveGroupMembers({ name: 'X', type: 'select', filter: '(a+)+$' }, [hostile])).toEqual(['DIRECT'])
+  })
 })
 
 describe('renderMihomo', () => {
