@@ -1,4 +1,5 @@
 import type { ProxyNode } from '../model.js'
+import { compileLinearRegex } from '../safeRegex.js'
 
 /** 常见地区关键词 → 区域码 + emoji。用于从节点名猜测地区。 */
 const REGION_TABLE: Array<{ re: RegExp; code: string; emoji: string }> = [
@@ -49,13 +50,13 @@ export function dedupe(nodes: ProxyNode[]): ProxyNode[] {
 
 /** 正则过滤（保留匹配 name 的节点）。 */
 export function keep(nodes: ProxyNode[], pattern: string | RegExp): ProxyNode[] {
-  const re = typeof pattern === 'string' ? new RegExp(pattern) : pattern
+  const re = typeof pattern === 'string' ? compileLinearRegex(pattern) : pattern
   return nodes.filter((n) => re.test(n.name))
 }
 
 /** 正则过滤（剔除匹配 name 的节点）。 */
 export function drop(nodes: ProxyNode[], pattern: string | RegExp): ProxyNode[] {
-  const re = typeof pattern === 'string' ? new RegExp(pattern) : pattern
+  const re = typeof pattern === 'string' ? compileLinearRegex(pattern) : pattern
   return nodes.filter((n) => !re.test(n.name))
 }
 

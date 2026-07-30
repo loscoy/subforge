@@ -15,6 +15,7 @@ describe('server config', () => {
   })
 
   it('运行时设置不再从环境变量读取', () => {
+    vi.stubEnv('ADMIN_TOKEN', 'legacy-secret')
     vi.stubEnv('MCP_TOKEN', 'remote-secret')
     vi.stubEnv('OPENAI_BASE_URL', 'https://example.com/v1')
     vi.stubEnv('OPENAI_API_KEY', 'sk-x')
@@ -23,5 +24,6 @@ describe('server config', () => {
     // 这些已迁到数据库设置，getConfig 只管引导项
     expect(getConfig()).not.toHaveProperty('mcpToken')
     expect(getConfig()).not.toHaveProperty('agent')
+    expect(getConfig()).not.toHaveProperty('adminToken')
   })
 })

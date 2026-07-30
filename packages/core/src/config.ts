@@ -40,7 +40,7 @@ export type NodeOp =
   | { op: 'keep'; pattern: string }
   /** 剔除 name 匹配正则的节点 */
   | { op: 'drop'; pattern: string }
-  /** 正则重命名：name.replace(new RegExp(from,'g'), to) */
+  /** 线性时间正则重命名（RE2 语法，全局替换） */
   | { op: 'rename'; from: string; to: string }
 
 /** 规则来源：既支持内联规则，也支持远程 rule-provider 引用。 */

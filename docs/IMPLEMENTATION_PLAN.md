@@ -6,7 +6,7 @@
 ## 实现状态（v0.1.0）
 
 - **Phase 1 端到端闭环** ✅ 已完成（解析 6 协议 → Mihomo 渲染 → sqlite → 抓取/缓存 → `/sub/:token`，含 Docker）
-- **Phase 2 可编程** ✅ 已完成（node:vm 沙箱 + 脚本 API/`.d.ts` + Monaco 编辑器 + 实时预览 + 组/规则 + 版本历史/回滚）
+- **Phase 2 可编程** ✅ 已完成（QuickJS-wasm 沙箱 + 脚本 API/`.d.ts` + Monaco 编辑器 + 实时预览 + 组/规则 + 版本历史/回滚）
 - **Phase 3 Agent** ✅ 已完成（框架无关工具 registry → 内嵌 AI SDK agent + 记忆 + MCP server）
 - **Phase 4 增强** ✅ 大部分完成：
   - ✅ sing-box 渲染器（协议 + 分组 + 规则 best-effort 翻译）
@@ -14,7 +14,7 @@
   - ✅ 订阅流量/到期（解析 `subscription-userinfo` 头，前端展示）
   - ✅ 节点测活/延迟（TCP 连接，API 端点 + `test_nodes` agent 工具 + 前端展示）
   - ✅ **serverless (Cloudflare Workers)**：`Storage` 已全面异步化；新增 `D1Storage`、`QuickJsRunner`（QuickJS-wasm 边缘沙箱）、Workers 入口 `worker.ts`、`wrangler.jsonc`、D1 迁移；前端由 assets 绑定托管。测活在边缘不可用（无原始 TCP）。详见 `docs/DEPLOY_CLOUDFLARE.md`。
-- **测试**：62 个用例全绿（解析 / 渲染 ×3 / node:vm 沙箱 / QuickJS 沙箱 / 存储契约 ×2(含 D1) / 工具 / 路由 / agent-mock / 测活 / 流量解析）。
+- **测试**：全量用例覆盖解析、渲染、QuickJS 沙箱、三种存储契约、工具、路由、agent-mock、测活与流量解析。
 - **验证**：D1 用「sqlite 伪造 D1」跑通存储契约单测；**并在 workerd（bookworm 容器内 `wrangler dev`）实测通过**：D1 迁移+读写、QuickJS-wasm 沙箱执行脚本、分享出口输出正确配置。（本机 glibc 2.31 无法直接跑 workerd，故用容器验证。）
 
 ## 0. 设计基调（已确定的决策）
@@ -43,7 +43,7 @@ packages/
 │   └── pipeline.ts        # 抓取→解析→脚本→组→规则→渲染
 ├── server/                # Node 后端 (Hono/Fastify)
 │   ├── storage/           # Storage 接口 + sqlite 实现
-│   ├── sandbox/           # ScriptRunner 接口 + isolated-vm 实现
+│   ├── sandbox/           # QuickJS-wasm ScriptRunner（Node / Workers）
 │   ├── tools/             # ★ 工具注册表（唯一真相来源）
 │   ├── agent/             # 内嵌 agent（消费 tools） + MCP server（消费 tools）
 │   └── routes/            # 管理 API + /sub/:token 分享出口
@@ -54,7 +54,7 @@ packages/
 
 - `Renderer`：`render(ctx: RenderContext): string` —— 加输出格式=实现一个。
 - `Storage`：订阅/脚本/组/规则/版本历史的读写 —— Node 用 sqlite，serverless 后续换 KV/D1。
-- `ScriptRunner`：`run(code, input): Promise<Result>` —— Node 用 isolated-vm，serverless 后续换 QuickJS-wasm/原生 isolate。
+- `ScriptRunner`：`run(code, input): Promise<Result>` —— Node 与 serverless 都使用 QuickJS-wasm 隔离执行。
 - `Tool`：`{ name, description, schema, handler }` —— **工具注册表**，MCP server 和内嵌 agent 都是它的适配器。
 - `AgentRunner`：`run(input, { tools, memory, model }): AsyncIterable<Step>` —— **agent 循环抽象**，AI SDK 是其一个实现，将来可换 Mastra 等，业务层不动。
 - `Memory`：`load(threadId)` / `append(threadId, msgs)` / `getWorkingMemory()` / `updateWorkingMemory()` —— **框架无关记忆**，sqlite 实现；换 SDK/存储都不丢记忆。

@@ -1,6 +1,6 @@
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
 import { checkNodes } from '../health.js'
-import { NodeVmRunner } from '../sandbox/nodeVm.js'
+import { QuickJsRunner } from '../sandbox/quickjs.js'
 import { SqliteStorage } from '../storage/index.js'
 import { createMcpServer } from './server.js'
 import { getConfig } from '../config.js'
@@ -15,7 +15,7 @@ import { getConfig } from '../config.js'
 async function main() {
   const cfg = getConfig()
   const storage = new SqliteStorage(cfg.dbPath)
-  const runner = new NodeVmRunner()
+  const runner = new QuickJsRunner()
   const server = createMcpServer({ storage, runner, checkNodes })
   const transport = new StdioServerTransport()
   await server.connect(transport)

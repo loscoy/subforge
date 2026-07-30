@@ -76,7 +76,7 @@ export function App() {
   const [meta, setMeta] = useState<Meta | null>(null)
   const [metaStatus, setMetaStatus] = useState<'loading' | 'success' | 'error'>('loading')
   const [metaError, setMetaError] = useState('')
-  const [auth, setAuth] = useState<'loading' | 'setup' | 'setup-legacy' | 'login' | 'ready'>('loading')
+  const [auth, setAuth] = useState<'loading' | 'setup' | 'login' | 'ready'>('loading')
   const [agentOpen, setAgentOpen] = useState(false)
   const [subsAddOpen, setSubsAddOpen] = useState(false)
   // 配置页当前选中的档，用于 Agent 抽屉的上下文切换
@@ -106,7 +106,7 @@ export function App() {
     authApi
       .status()
       .then((s) => {
-        if (!s.initialized) setAuth(s.legacyTokenRequired ? 'setup-legacy' : 'setup')
+        if (!s.initialized) setAuth('setup')
         else if (!s.authenticated) setAuth('login')
         else {
           setAuth('ready')
@@ -139,7 +139,6 @@ export function App() {
     return (
       <AuthGate
         mode={auth === 'login' ? 'login' : 'setup'}
-        legacyTokenRequired={auth === 'setup-legacy'}
         brand={<Brand />}
         onDone={() => {
           setAuth('ready')

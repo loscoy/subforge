@@ -1,4 +1,4 @@
-import type { AgentMessage, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, LoginThrottle, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
 
 /** 纯内存实现：用于测试，也可作无持久化的临时运行。方法为 async 以符合 Storage 接口。 */
 export class InMemoryStorage implements Storage {
@@ -11,6 +11,7 @@ export class InMemoryStorage implements Storage {
   private workingMemory = ''
   private settings: string | undefined
   private auth: string | undefined
+  private loginThrottles = new Map<string, LoginThrottle>()
 
   async listSubscriptions(): Promise<Subscription[]> {
     return [...this.subs.values()].sort((a, b) => a.createdAt - b.createdAt)
@@ -115,6 +116,36 @@ export class InMemoryStorage implements Storage {
   async setAuth(json: string) {
     this.auth = json
   }
+  async createAuthIfUninitialized(json: string) {
+    if (this.auth !== undefined) {
+      try {
+        const current = JSON.parse(this.auth) as { account?: unknown }
+        if (!current || typeof current !== 'object' || current.account) return false
+      } catch {
+        return false
+      }
+    }
+    this.auth = json
+    return true
+  }
+
+  async getLoginThrottle(key: string) {
+    return this.loginThrottles.get(key)
+  }
+  async recordLoginFailure(key: string, at: number) {
+    const failures = Math.min((this.loginThrottles.get(key)?.failures ?? 0) + 1, 12)
+    const delay = loginLockDelay(failures)
+    const value = { failures, lockedUntil: delay ? at + delay : 0 }
+    this.loginThrottles.set(key, value)
+    return value
+  }
+  async clearLoginThrottle(key: string) {
+    this.loginThrottles.delete(key)
+  }
 
   async close() {}
+}
+
+function loginLockDelay(failures: number): number {
+  return failures < 5 ? 0 : Math.min(30_000 * 2 ** (failures - 5), 3_600_000)
 }

@@ -50,6 +50,28 @@ describe('NodeVmRunner', () => {
     expect(r2.ok).toBe(false)
   })
 
+  it('宿主构造器链无法取回 process', async () => {
+    const r = await runner.run(
+      `nodes[0].name = Object.constructor('return typeof process')(); return nodes`,
+      nodes,
+    )
+    expect(r.ok).toBe(true)
+    expect(r.nodes[0]!.name).toBe('undefined')
+  })
+
+  it('async 脚本可用（ScriptMain 的签名承诺了这一点）', async () => {
+    const r = await runner.run(`return await Promise.resolve(utils.keep(nodes, 'US'))`, nodes)
+    expect(r.ok).toBe(true)
+    expect(r.nodes).toHaveLength(2)
+  })
+
+  it('async 死循环仍受超时控制', async () => {
+    const limited = new NodeVmRunner(50)
+    const r = await limited.run(`return (async () => { while (true) { await null } })()`, nodes)
+    expect(r.ok).toBe(false)
+    expect(r.error).toContain('脚本执行超时')
+  })
+
   it('输入不被脚本副作用污染（深拷贝隔离）', async () => {
     await runner.run(`nodes[0].name = 'MUT'`, nodes)
     expect(nodes[0]!.name).toBe('🇭🇰 HK 01')

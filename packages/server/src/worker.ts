@@ -24,7 +24,6 @@ const edgeQuickJs = () =>
 export interface Env {
   DB: D1Database
   ASSETS?: Fetcher
-  ADMIN_TOKEN?: string
   SUBFORGE_ALLOW_NO_AUTH?: string
   /** 加密数据库里密钥字段的主密钥；未设则 Agent 与远端 MCP 失败关闭 */
   SETTINGS_KEY?: string
@@ -41,7 +40,6 @@ export default {
     const config: ServerConfig = {
       port: 0,
       dbPath: '',
-      adminToken: env.ADMIN_TOKEN || undefined,
       allowNoAuth: env.SUBFORGE_ALLOW_NO_AUTH === '1',
       settingsKey: env.SETTINGS_KEY || undefined,
     }

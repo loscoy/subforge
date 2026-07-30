@@ -44,7 +44,7 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 - **`packages/core`**（纯逻辑，无 I/O，边缘可移植）
   节点 IR（`model.ts`）、转换档配置（`config.ts`）、解析器（`parsers/`，URI / base64 / Clash YAML）、渲染器注册表（`renderers/`，mihomo / sing-box / surge）、声明式处理（`preprocess.ts`）、预设与模板（`presets.ts`）、脚本工具与 `.d.ts`（`script/`）、端到端管线（`pipeline.ts`）。
 - **`packages/server`**（Hono，双运行时）
-  路由（`routes/app.ts`）、业务编排（`service.ts`）、存储三实现（`storage/`：memory / sqlite / d1）、脚本沙箱两实现（`sandbox/`：nodeVm / quickjs）、Agent（`agent/`）、工具注册表（`tools/registry.ts`）、MCP 适配（`mcp/`）。
+  路由（`routes/app.ts`）、业务编排（`service.ts`）、存储三实现（`storage/`：memory / sqlite / d1）、QuickJS 脚本沙箱（`sandbox/quickjs.ts`，`nodeVm.ts` 仅保留旧导入兼容层）、Agent（`agent/`）、工具注册表（`tools/registry.ts`）、MCP 适配（`mcp/`）。
 - **`packages/web`**（React 18 + Vite + Mantine v7 + Monaco）
 
 核心数据流：`订阅原文 → parseSubscription → applyOperations → 脚本(transform 或 override) → expandRegionGroups → renderer → 输出配置`，统一由 `core/pipeline.ts::runPipeline` 串起来，服务端入口是 `service.ts::buildProfileOutput`。
@@ -56,7 +56,7 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 | | Node（`src/index.ts`） | Workers（`src/worker.ts`） |
 |---|---|---|
 | 存储 | `SqliteStorage`（better-sqlite3） | `D1Storage` |
-| 沙箱 | `NodeVmRunner`（node:vm） | `QuickJsRunner`（QuickJS-wasm） |
+| 沙箱 | `QuickJsRunner`（QuickJS-wasm） | `QuickJsRunner`（QuickJS-wasm） |
 | 测活 | `checkNodes`（node:net） | 不注入 → 能力缺失 |
 
 **`worker.ts` 只能 import 边缘可移植的模块**，绝不能间接引入 `better-sqlite3` / `node:vm` / `node:net`。往 `routes/app.ts` 或 `service.ts` 加依赖时要确认这一点。
@@ -99,7 +99,7 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 | | 引导配置（`config.ts::ServerConfig`） | 运行时设置（`settings.ts::Settings`） |
 |---|---|---|
 | 来源 | 环境变量，启动后不变 | 数据库 `kv` 表的 `settings` 行 |
-| 内容 | `PORT` / `DB_PATH` / `WEB_DIR` / `ADMIN_TOKEN` / `SUBFORGE_ALLOW_NO_AUTH` / `SETTINGS_KEY` | 模型三件套、联网工具、远端 MCP 口令 |
+| 内容 | `PORT` / `DB_PATH` / `WEB_DIR` / `SUBFORGE_ALLOW_NO_AUTH` / `SETTINGS_KEY` | 模型三件套、联网工具、远端 MCP 口令 |
 | 改动生效 | 重启 | 下一个请求（路由里 `settingsOf()` 现读） |
 | 归属 | 「怎么把服务跑起来」 | 「跑起来之后干什么」 |
 
@@ -118,7 +118,11 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 - **transform**：`return nodes`，只变换节点；分组/规则来自转换档配置。
 - **override**：`main(config)` 收完整 Clash 配置、返回完整配置（兼容 Sub-Store 生态）。此时转换档里的分组/规则被忽略，但「节点处理（operations）」仍在脚本前生效，两者共存。
 
-边缘（QuickJS）只支持同步脚本。
+Node 与边缘都由 QuickJS-wasm 隔离执行，CPU、内存与栈均有限额。
+
+**async 脚本可用**，尽管用的是同步 wasm 变体：沙箱里不注入任何异步 host 函数（无 fetch、无 timer，`__util` / `__log` 都是同步桥），所以脚本里的 promise 只可能被微任务推动。`sandbox/quickjs.ts::settleJson` 抽干 `executePendingJobs()` 即可落定；反过来「队列已空却仍 pending」就等于这个 await 永远不会完成（如 `new Promise(() => {})`），立即报错而不是挂住请求。
+
+因此**不要**为了 async 换成 asyncify 变体——那要多 0.5MB wasm 且得内联进 worker，而它多出来的能力（异步 host 函数）我们并不需要。若将来真要注入异步 host 函数（如给脚本开放 fetch），上面这条「队列空 = 永不完成」的判断就不再成立，那时才需要重新评估。
 
 ### 协议解析与支持矩阵
 
@@ -157,13 +161,13 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 
 ### 鉴权与安全
 
-管理接口用**单账号 + Cookie 会话**（`auth.ts`）：账号与会话存 kv 表 `auth` 键，密码 PBKDF2-SHA256（WebCrypto，边缘可移植），会话 30 天、库里只存 token 哈希。未初始化时 `/api/*` 返回 401 + `needsSetup`，前端引导「创建管理员账号」。脚本/自动化用 `POST /api/auth/login` 换 token 后走 `Authorization: Bearer`。`SUBFORGE_ALLOW_NO_AUTH=1` 仍是本地无鉴权逃生门（此模式下 auth/status 直接放行，不弹门页）。`ADMIN_TOKEN` 只剩升级保护用途：环境里仍设有它时，初始化账号必须先验旧口令（防存量公网实例被抢注），建号后可移除。分享出口 `/sub/:token` 始终公开，不受影响。
+管理接口用**单账号 + Cookie 会话**（`auth.ts`）：账号与会话存 kv 表 `auth` 键，密码 PBKDF2-SHA256（WebCrypto，边缘可移植），会话 30 天、库里只存 token 哈希。未初始化时 `/api/*` 返回 401 + `needsSetup`，首次访问可直接建号（TOFU）。账号首建使用存储层条件写，保证并发请求不能覆盖已创建账号。登录失败按账号 + 客户端 IP 持久化并递增退避。脚本/自动化用 `POST /api/auth/login` 换 token 后走 `Authorization: Bearer`。`SUBFORGE_ALLOW_NO_AUTH=1` 仍是本地无鉴权逃生门。分享出口 `/sub/:token` 始终公开，不受影响。
 
-抓取订阅 URL 前必须过 `net.ts::assertPublicHttpUrl`（SSRF 防护：拒绝 localhost / 私网 / `169.254.169.254` 等）。任何新增的「抓取用户提供的 URL」的代码都要走这个函数。
+抓取订阅 URL 前必须过 `net.ts::assertPublicHttpUrl`（SSRF 防护：拒绝 localhost / 私网 / `169.254.169.254` 等），并用 `redirect: 'manual'` 对每一跳重新校验；还必须设置总超时并流式限制响应体。任何新增的「抓取用户提供的 URL」的代码都要遵守同一边界。
 
 **例外：模型 Base URL 不做私网校验**（`agent/probe.ts` 与 AI SDK 的请求）。本地大模型（Ollama / LM Studio 的 `http://localhost:11434/v1`）是自托管的一等场景，而这条路径在登录鉴权之后——能调它的人已经能跑脚本了，拦私网只会挡掉正常用法。只校验必须是 http(s)。
 
-注意 `NodeVmRunner` 不是强安全边界（`node:vm`），仅适用于单人自用；QuickJS（边缘）才是真隔离。
+`NodeVmRunner` 只用于兼容旧导入名，内部同样委托给 `QuickJsRunner`；不得重新引入 `node:vm` 执行用户脚本。
 
 ## Cloudflare 部署的坑
 
@@ -172,7 +176,7 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 - **QuickJS wasm 必须内联进 worker**：workerd 禁止运行时从字节编译 wasm。`scripts/copy-quickjs-wasm.mjs` 把 `.wasm` 拷到 `src/quickjs.wasm`（gitignored，属生成物），`worker.ts` 以 `CompiledWasm` 形式 import 并通过 `newVariant(releaseSyncVariant, { wasmModule })` 注入。不要改回运行时加载。
 - `QuickJsRunner` 实例放在 **worker 模块作用域**（非 `fetch` 内），让 WASM 模块在同一 isolate 内跨请求复用。
 - 本仓库开发宿主 glibc 2.31 跑不了 workerd；需要 `wrangler dev` 时在 `node:22-bookworm` 容器内跑（见 `docs/DEPLOY_CLOUDFLARE.md`）。
-- `wrangler deploy` 会覆盖不在配置里的环境变量。`SETTINGS_KEY`（以及升级保护期间的 `ADMIN_TOKEN`）要用 `wrangler secret put` 设置（secret 才能在重新部署后留存），不要在 dashboard 里设成明文 Variables。管理鉴权已改为账号登录，`ADMIN_TOKEN` 建号后可删。
+- `wrangler deploy` 会覆盖不在配置里的环境变量。`SETTINGS_KEY` 要用 `wrangler secret put` 设置，不要在 dashboard 里设成明文 Variables。
 
 ## 前端
 

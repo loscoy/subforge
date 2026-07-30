@@ -29,7 +29,7 @@
 |---|---|---|---|
 | `Renderer` | 节点 → 输出格式 | Mihomo / sing-box / Surge | QuantumultX … |
 | `Storage` | 持久化 | sqlite / 内存 / **D1** | KV … |
-| `ScriptRunner` | 脚本沙箱 | node:vm / **QuickJS-wasm** | isolated-vm … |
+| `ScriptRunner` | 脚本沙箱 | **QuickJS-wasm**（Node / Workers） | isolated-vm … |
 | `AgentRunner` | agent 循环 | Vercel AI SDK | Mastra … |
 | `Memory` | agent 记忆 | sqlite | 向量库（语义召回） |
 | `Tool` registry | 工具集（唯一真相来源） | — | 同时供内嵌 agent 与 MCP server |
@@ -59,7 +59,7 @@ npm test               # 运行全部测试
 ### Cloudflare Workers（serverless）
 
 D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDFLARE.md`](docs/DEPLOY_CLOUDFLARE.md)。
-边缘部署不支持节点测活（无原始 TCP）；脚本仅支持同步。
+边缘部署不支持节点测活（无原始 TCP）；所有部署的脚本都仅支持同步执行。
 
 ## 环境变量
 
@@ -67,7 +67,6 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 |---|---|
 | `PORT` | 服务端口（默认 8787） |
 | `DB_PATH` | sqlite 路径（默认 `./data/subforge.sqlite`） |
-| `ADMIN_TOKEN` | （遗留）旧管理口令，仅剩升级保护用途：环境仍设有它时，首次创建账号需先验证它，防止存量公网实例被抢注。建号后可移除 |
 | `SUBFORGE_ALLOW_NO_AUTH` | 设为 `1` 时跳过登录鉴权，无鉴权提供管理接口（仅限本地自用，切勿暴露公网） |
 | `SETTINGS_KEY` | 加密数据库里密钥字段（模型 API Key、MCP 口令）的主密钥。未设时密钥存不进去，Agent 与远端 MCP 保持关闭 |
 
@@ -83,7 +82,7 @@ D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDF
 > OpenRouter 那套是由网关服务端执行的，**只有当模型 Base URL 指向 OpenRouter 时才生效**；
 > 换成直连 OpenAI 或本地模型请用 Tavily / Exa——那两个由本实例自己调用，与模型供应商无关。
 
-> 安全说明：管理界面用**账号密码登录**（首次访问引导创建，30 天 Cookie 会话，设置页可改密码；忘记密码时删掉数据库 `kv` 表的 `auth` 行重走向导）。脚本/自动化调 `/api/*` 时先 `POST /api/auth/login` 换 token，再走 `Authorization: Bearer`。未初始化账号且未设 `SUBFORGE_ALLOW_NO_AUTH=1` 时，`/api/*` 一律返回 401（分享出口 `/sub/:token` 不受影响，仍公开）。远端 MCP 使用独立的口令，不受无鉴权模式影响。密钥在库里是 AES-GCM 密文，解不开（没配 `SETTINGS_KEY`、或换过）一律按未配置处理。抓取订阅 URL 时会做 SSRF 防护，拒绝 `localhost`/内网/`169.254.169.254`(云元数据) 等地址；模型 Base URL 不在此限，以便接本地大模型。
+> 安全说明：管理界面用**账号密码登录**（30 天 Cookie 会话，设置页可改密码），未建号时采用首次访问即建号（TOFU）。重启服务不会清除已创建账号，恢复初始化需处理持久化数据库 `kv` 表的 `auth` 行。脚本/自动化调 `/api/*` 时先 `POST /api/auth/login` 换 token，再走 `Authorization: Bearer`。分享出口 `/sub/:token` 始终公开。远端 MCP 使用独立口令。密钥在库里是 AES-GCM 密文，解不开一律按未配置处理。订阅抓取会拒绝本机/内网/云元数据地址、逐跳校验重定向，并限制超时与响应体大小；模型 Base URL 保留本地模型豁免，但探测失败不会回显响应正文。
 
 ## 用 Claude Code / Codex 驱动（MCP）
 
@@ -156,7 +155,7 @@ stdio 模式直接访问同一个 sqlite 文件，不需要 MCP 口令：
 // 可用全局：nodes、utils、console、params（编辑器内有补全）
 let ns = utils.tagRegions(nodes)
 ns = utils.dedupe(ns)
-ns = utils.drop(ns, /过期|剩余|官网/)
+ns = utils.drop(ns, '过期|剩余|官网')
 return ns
 ```
 
@@ -170,7 +169,7 @@ function main(config) {
 }
 ```
 
-> override 模式在边缘（QuickJS）仅支持同步脚本；`$arguments` 对应转换档参数。像 [powerfullz/override-rules](https://github.com/powerfullz/override-rules) 这类脚本可直接使用。
+> Node 与 Workers 都由 QuickJS 隔离执行，transform / override 均仅支持同步脚本；`$arguments` 对应转换档参数。配置里的动态正则使用线性时间的 RE2 语法。像 [powerfullz/override-rules](https://github.com/powerfullz/override-rules) 这类同步脚本可直接使用。
 
 ## License
 
