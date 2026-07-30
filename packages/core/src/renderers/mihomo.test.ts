@@ -72,3 +72,33 @@ describe('renderMihomo', () => {
     expect(cfg.rules[cfg.rules.length - 1]).toBe('MATCH,🚀 节点选择')
   })
 })
+
+describe('坏正则的降级行为（不得中断渲染）', () => {
+  const names = ['HK 01', '回国专线', 'US 02']
+
+  it('负向环视 filter 仍然可用（存量配置的常见写法）', () => {
+    const members = resolveGroupMembers(
+      { name: 'g', type: 'select', includeAll: true, filter: '^(?!.*回国).*$' },
+      names,
+    )
+    expect(members).toEqual(['HK 01', 'US 02'])
+  })
+
+  it('无法编译的 filter 使该组为空而不是抛错', () => {
+    expect(() =>
+      resolveGroupMembers({ name: 'g', type: 'select', includeAll: true, filter: '^(?!x)(a+)+$' }, names),
+    ).not.toThrow()
+    // 组不能为空 → 兜底 DIRECT
+    expect(
+      resolveGroupMembers({ name: 'g', type: 'select', includeAll: true, filter: '^(?!x)(a+)+$' }, names),
+    ).toEqual(['DIRECT'])
+  })
+
+  it('无法编译的 excludeFilter 只让该条排除失效，其余成员保留', () => {
+    const members = resolveGroupMembers(
+      { name: 'g', type: 'select', includeAll: true, excludeFilter: '[unclosed' },
+      names,
+    )
+    expect(members).toEqual(names)
+  })
+})

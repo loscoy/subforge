@@ -1,7 +1,7 @@
 import * as yaml from 'js-yaml'
 import type { ProxyGroupDef, RenderContext } from '../config.js'
 import type { ProxyNode } from '../model.js'
-import { compileLinearRegex } from '../safeRegex.js'
+import { tryCompileLinearRegex } from '../safeRegex.js'
 
 /** 把统一节点转换为 Mihomo proxy 对象。 */
 export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
@@ -97,13 +97,15 @@ export function resolveGroupMembers(group: ProxyGroupDef, nodeNames: string[]): 
   if (group.includeAll) pool = [...nodeNames]
   else if (group.filter) pool = [...nodeNames]
 
+  // 坏正则（含 RE2 不支持又有回溯风险的写法）只让该条筛选失效，
+  // 绝不抛出——否则单个组的正则就能打挂整份配置的渲染与公开分享出口。
   if (group.filter) {
-    const re = compileLinearRegex(group.filter)
-    pool = pool.filter((name) => re.test(name))
+    const re = tryCompileLinearRegex(group.filter)
+    pool = re ? pool.filter((name) => re.test(name)) : []
   }
   if (group.excludeFilter) {
-    const re = compileLinearRegex(group.excludeFilter)
-    pool = pool.filter((name) => !re.test(name))
+    const re = tryCompileLinearRegex(group.excludeFilter)
+    if (re) pool = pool.filter((name) => !re.test(name))
   }
   members.push(...pool)
 

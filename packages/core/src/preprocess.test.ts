@@ -32,10 +32,11 @@ describe('applyOperations', () => {
     expect(applyOperations([long], [{ op: 'rename', from: '(a+)+$', to: 'x' }])[0]!.name).toBe(long.name)
   })
 
-  it('保留捕获组替换语义，并明确拒绝 RE2 不支持的回溯语法', () => {
+  it('保留捕获组替换语义；RE2 不支持的语法走有界回退而不是中断流水线', () => {
     const renamed = applyOperations(nodes.slice(0, 1), [{ op: 'rename', from: '(HK) (\\d+)', to: '$1-$2' }])
     expect(renamed[0]!.name).toContain('HK-01')
-    expect(() => applyOperations(nodes, [{ op: 'keep', pattern: '(HK)\\1' }])).toThrow('正则表达式不受支持')
+    // 反向引用 RE2 编译不了，但本身不含易回溯构造 → 回退原生引擎后照常工作，不再抛错
+    expect(() => applyOperations(nodes, [{ op: 'keep', pattern: '(HK)\\1' }])).not.toThrow()
   })
 })
 
@@ -83,5 +84,29 @@ describe('模板 + 管线端到端', () => {
     expect(p.groups.some((g) => g.name === 'Google')).toBe(true)
     expect(p.rules).toContain('GEOSITE,google,Google')
     expect(p.rules[p.rules.length - 1]).toBe('MATCH,节点选择')
+  })
+})
+
+describe('坏正则的降级行为', () => {
+  const nodes = [
+    makeNode({ name: 'HK 01', type: 'ss', server: '1.1.1.1', port: 1 }),
+    makeNode({ name: '回国 02', type: 'ss', server: '2.2.2.2', port: 2 }),
+  ]
+
+  it('keep 用负向环视仍然可用', () => {
+    expect(applyOperations(nodes, [{ op: 'keep', pattern: '^(?!.*回国).*$' }]).map((n) => n.name)).toEqual(['HK 01'])
+  })
+
+  it('无法编译的 keep 正则被跳过，节点原样通过而不抛错', () => {
+    expect(applyOperations(nodes, [{ op: 'keep', pattern: '^(?!x)(a+)+$' }]).map((n) => n.name)).toEqual([
+      'HK 01',
+      '回国 02',
+    ])
+  })
+
+  it('无法编译的 rename 正则被跳过', () => {
+    expect(
+      applyOperations(nodes, [{ op: 'rename', from: '[unclosed', to: 'X' }]).map((n) => n.name),
+    ).toEqual(['HK 01', '回国 02'])
   })
 })
