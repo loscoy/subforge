@@ -21,7 +21,19 @@ export { runPipeline } from './pipeline.js'
 export type { PipelineInput, PipelineOutput } from './pipeline.js'
 
 // 脚本 API
-export { scriptUtils, regionOf, emojiOf, multiplierOf, dedupe, keep, drop, uniquifyNames, tagRegions } from './script/utils.js'
+export {
+  scriptUtils,
+  regionOf,
+  emojiOf,
+  multiplierOf,
+  dedupe,
+  keep,
+  drop,
+  uniquifyNames,
+  sanitizeNodeName,
+  sanitizeNodeNames,
+  tagRegions,
+} from './script/utils.js'
 export type { ScriptUtils } from './script/utils.js'
 export type { ScriptContext, ScriptMain, ScriptResult, OverrideResult } from './script/types.js'
 export { isOverrideScript } from './script/types.js'
