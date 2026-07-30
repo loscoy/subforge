@@ -125,7 +125,7 @@ export function renderSurge(ctx: RenderContext): string {
   const groupLines = profile.groups.map((g) => {
     // 先用真实名字跑 filter（正则语义不受 Surge 转义影响），再把成员名换成 Surge 安全名，
     // 保证组成员引用与上面 [Proxy] 段里的条目名一致。
-    const members = resolveGroupMembers(g, nodeNames).map(surgeSafeName)
+    const members = resolveGroupMembers(g, nodeNames, ctx.warnings).map(surgeSafeName)
     const opts: string[] = []
     if (g.type === 'url-test' || g.type === 'fallback' || g.type === 'load-balance') {
       if (g.url) opts.push(`url=${surgeSafeValue(g.url)}`)

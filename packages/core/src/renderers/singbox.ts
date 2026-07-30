@@ -98,8 +98,8 @@ export function nodeToSingbox(n: ProxyNode): Record<string, unknown> {
   return o
 }
 
-function groupToOutbound(g: ProxyGroupDef, nodeNames: string[]): Record<string, unknown> {
-  const outbounds = resolveGroupMembers(g, nodeNames)
+function groupToOutbound(g: ProxyGroupDef, nodeNames: string[], warnings?: string[]): Record<string, unknown> {
+  const outbounds = resolveGroupMembers(g, nodeNames, warnings)
   if (g.type === 'url-test' || g.type === 'fallback' || g.type === 'load-balance') {
     return {
       type: 'urltest',
@@ -142,7 +142,7 @@ export function renderSingbox(ctx: RenderContext): string {
   const nodes = filterSupported(ctx.nodes, 'singbox', ctx.warnings)
   const nodeNames = nodes.map((n) => n.name)
   const proxyOutbounds = nodes.map(nodeToSingbox)
-  const groupOutbounds = profile.groups.map((g) => groupToOutbound(g, nodeNames))
+  const groupOutbounds = profile.groups.map((g) => groupToOutbound(g, nodeNames, ctx.warnings))
 
   const routeRules: Record<string, unknown>[] = []
   let finalOutbound = profile.groups[0]?.name ?? 'DIRECT'
