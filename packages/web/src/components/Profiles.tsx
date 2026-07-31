@@ -1,6 +1,7 @@
 import { COMMON_GROUPS, RULE_PRESETS } from '@subforge/core'
 import {
   ActionIcon,
+  Alert,
   Badge,
   Box,
   Button,
@@ -326,6 +327,8 @@ function ProfileDetail({
   const [preview, setPreview] = useState<string | null>(null)
   const [previewLoading, setPreviewLoading] = useState(false)
   const [previewError, setPreviewError] = useState('')
+  /** 渲染期告警，如「目标格式不支持某协议，已跳过 N 个节点」 */
+  const [previewWarnings, setPreviewWarnings] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [savedAt, setSavedAt] = useState(profile.updatedAt)
   const [outputLoading, setOutputLoading] = useState(false)
@@ -459,6 +462,7 @@ function ProfileDetail({
     setPreviewError('')
     try {
       const o = await api.output(profile.id)
+      setPreviewWarnings(o.warnings ?? [])
       if (o.ok) setPreview(o.config || '')
       else {
         setPreview(null)
@@ -466,6 +470,7 @@ function ProfileDetail({
       }
     } catch (e) {
       setPreview(null)
+      setPreviewWarnings([])
       setPreviewError(String(e))
     } finally {
       setPreviewLoading(false)
@@ -476,6 +481,7 @@ function ProfileDetail({
   useEffect(() => {
     setPreview(null)
     setPreviewError('')
+    setPreviewWarnings([])
     if (!previewOpen) return
     void loadPreview()
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -948,7 +954,18 @@ function ProfileDetail({
                   {previewError}
                 </Text>
               ) : preview ? (
-                <pre className="output-dock-pre mono">{preview}</pre>
+                <>
+                  {previewWarnings.length > 0 && (
+                    <Alert color="yellow" variant="light" radius={0} icon={<IAlert size={15} />} py={8} px={14}>
+                      {previewWarnings.map((w) => (
+                        <Text key={w} fz={12.5}>
+                          {w}
+                        </Text>
+                      ))}
+                    </Alert>
+                  )}
+                  <pre className="output-dock-pre mono">{preview}</pre>
+                </>
               ) : (
                 <Text c="dimmed" fz={12.5} p={14}>
                   关联订阅后这里会显示最终生成的配置。

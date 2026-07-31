@@ -4,6 +4,7 @@ import type { ProxyNode } from './model.js'
 import { parseSubscription } from './parsers/index.js'
 import { getRenderer } from './renderers/index.js'
 import { nodeToMihomo } from './renderers/mihomo.js'
+import { filterSupported } from './renderers/support.js'
 import { applyOperations, expandRegionGroups } from './preprocess.js'
 import type { ScriptRunner } from './script/runner.js'
 import { isOverrideScript } from './script/types.js'
@@ -30,6 +31,8 @@ export interface PipelineOutput {
   nodes: ProxyNode[]
   /** 脚本 console 输出 */
   logs: string[]
+  /** 渲染期告警，如「目标格式不支持某协议，已跳过 N 个节点」 */
+  warnings: string[]
   /** 各阶段计数，便于调试/预览 */
   stats: { parsed: number; afterScript: number }
 }
@@ -47,18 +50,21 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineOutput>
   let nodes = input.profile.operations?.length ? applyOperations(parsed, input.profile.operations) : parsed
   nodes = uniquifyNames(nodes)
   const logs: string[] = []
+  const warnings: string[] = []
   const script = input.script?.trim()
 
   // ---- override（覆写）脚本：main(config) 返回完整配置，直接序列化 ----
   if (script && isOverrideScript(script)) {
     if (!input.runner) throw new Error('提供了 script 但未注入 ScriptRunner')
-    const clashProxies = nodes.map(nodeToMihomo)
+    // 覆写脚本收到的是一份 Clash 配置，因此按 mihomo 的能力过滤
+    const renderable = filterSupported(nodes, 'mihomo', warnings)
+    const clashProxies = renderable.map(nodeToMihomo)
     const result = await input.runner.runOverride(script, { proxies: clashProxies }, input.scriptParams)
     logs.push(...result.logs)
     if (!result.ok) throw new Error(`覆写脚本执行失败: ${result.error}`)
     if (!result.config || typeof result.config !== 'object') throw new Error('覆写脚本 main(config) 未返回配置对象')
     const config = yaml.dump(result.config, { lineWidth: -1, noRefs: true, sortKeys: false })
-    return { config, nodes, logs, stats: { parsed: parsed.length, afterScript: nodes.length } }
+    return { config, nodes, logs, warnings, stats: { parsed: parsed.length, afterScript: nodes.length } }
   }
 
   // ---- transform（节点变换）脚本：return nodes ----
@@ -74,12 +80,13 @@ export async function runPipeline(input: PipelineInput): Promise<PipelineOutput>
   if (!renderer) throw new Error(`未知的目标格式: ${input.target}`)
   // 展开「地区自动分组」
   const groups = expandRegionGroups(input.profile.groups, nodes)
-  const config = renderer.render({ nodes, profile: { ...input.profile, groups } })
+  const config = renderer.render({ nodes, profile: { ...input.profile, groups }, warnings })
 
   return {
     config,
     nodes,
     logs,
+    warnings,
     stats: { parsed: parsed.length, afterScript: nodes.length },
   }
 }

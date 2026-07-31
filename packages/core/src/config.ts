@@ -74,4 +74,9 @@ export interface ConversionProfile {
 export interface RenderContext {
   nodes: ProxyNode[]
   profile: ConversionProfile
+  /**
+   * 渲染期告警的收集槽。渲染器把「跳过了哪些不受支持的节点」之类的信息
+   * 追加进来，由 pipeline 汇总后回给前端预览。不传则丢弃告警。
+   */
+  warnings?: string[]
 }

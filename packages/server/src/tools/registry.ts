@@ -250,7 +250,7 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
         }
         try {
           const out = await buildProfileOutput(storage, runner, target ? { ...p, target } : p)
-          return { ok: true, target: target ?? p.target, bytes: out.config.length, config: out.config }
+          return { ok: true, target: target ?? p.target, bytes: out.config.length, warnings: out.warnings, config: out.config }
         } catch (e) {
           return { ok: false, error: e instanceof Error ? e.message : String(e) }
         }
@@ -334,7 +334,7 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
         if (!p) throw new Error('配置不存在')
         try {
           const out = await buildProfileOutput(storage, runner, p)
-          return { ok: true, nodeCount: out.nodes.length, bytes: out.config.length, logs: out.logs }
+          return { ok: true, nodeCount: out.nodes.length, bytes: out.config.length, logs: out.logs, warnings: out.warnings }
         } catch (e) {
           return { ok: false, error: e instanceof Error ? e.message : String(e) }
         }

@@ -8,10 +8,11 @@ export type { RulePreset, Template, AssembleOptions } from './presets.js'
 export { applyOperations, expandRegionGroups } from './preprocess.js'
 
 // 解析 / 渲染 / 管线
-export { parseUri, parseSubscription } from './parsers/index.js'
+export { parseUri, parseSubscription, splitNodeTokens } from './parsers/index.js'
 export { parseClashYaml, clashProxyToNode } from './parsers/clash.js'
 export { b64decode, looksLikeBase64 } from './parsers/util.js'
 export { getRenderer, registerRenderer, listRenderers, renderMihomo, renderSingbox, renderSurge } from './renderers/index.js'
+export { supportsType, filterSupported } from './renderers/support.js'
 export type { Renderer } from './renderers/index.js'
 export { nodeToMihomo, resolveGroupMembers } from './renderers/mihomo.js'
 export { nodeToSingbox, clashRuleToSingbox } from './renderers/singbox.js'

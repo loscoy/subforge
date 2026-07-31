@@ -81,7 +81,8 @@ export const api = {
   deleteProfile: (id: string) => req(`/profiles/${id}`, { method: 'DELETE' }),
   preview: (id: string, script: string) =>
     req<PreviewResult>(`/profiles/${id}/preview`, { method: 'POST', body: JSON.stringify({ script }) }),
-  output: (id: string) => req<{ ok: boolean; config?: string; error?: string }>(`/profiles/${id}/output`),
+  output: (id: string) =>
+    req<{ ok: boolean; config?: string; error?: string; warnings?: string[] }>(`/profiles/${id}/output`),
   healthcheck: (id: string) =>
     req<{ total: number; alive: number; results: { name: string; latency: number | null }[] }>(
       `/profiles/${id}/healthcheck`,

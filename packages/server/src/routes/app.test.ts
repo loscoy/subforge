@@ -61,6 +61,66 @@ describe('HTTP app', () => {
     expect(cfg['proxy-groups'][1].proxies).toEqual(['🇭🇰 HK 01'])
   })
 
+  it('粘贴多协议节点：全部解析出来，不受支持的按目标格式跳过并回报警告', async () => {
+    const b64 = (s: string) => Buffer.from(s, 'utf-8').toString('base64')
+    // 用户手工粘贴的一坨节点：混合协议 + ss 带 plugin 参数 + vmess 三种形态
+    const pasted = [
+      `ss://${b64('aes-256-gcm:pw')}@1.1.1.1:8388?plugin=obfs-local%3Bobfs%3Dhttp%3Bobfs-host%3Dbing.com#SS 01`,
+      `vmess://${b64(JSON.stringify({ ps: 'VM 01', add: 'a.com', port: '443', id: 'u1', net: 'tcp' }))}`,
+      'vless://u1@b.com:443?type=ws&security=tls&path=%2Fp#VL 01',
+      'trojan://pw@c.com:443?sni=s.com#TJ 01',
+      'hysteria2://pw@d.com:443#HY 01',
+      `ssr://${b64('2.2.2.2:8388:origin:aes-256-cfb:plain:cHc=/?remarks=U1NSIDAx').replace(/\+/g, '-').replace(/\//g, '_')}`,
+    ].join('\n')
+
+    const sub = await json(
+      await app.fetch(
+        new Request('http://x/api/subscriptions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ name: 's', content: pasted }),
+        }),
+      ),
+    )
+    const prof = await json(
+      await app.fetch(
+        new Request('http://x/api/profiles', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            name: 'p',
+            subscriptionIds: [sub.id],
+            profile: { groups: [{ name: '🚀', type: 'select', includeAll: true }], rules: ['MATCH,🚀'] },
+          }),
+        }),
+      ),
+    )
+
+    // mihomo（默认目标）：6 个节点一个都不少
+    const out = await json(await app.fetch(new Request(`http://x/api/profiles/${prof.id}/output`)))
+    expect(out.ok).toBe(true)
+    const cfg = yaml.load(out.config) as any
+    expect(cfg.proxies).toHaveLength(6)
+    expect(cfg.proxies.map((p: any) => p.type)).toEqual(['ss', 'vmess', 'vless', 'trojan', 'hysteria2', 'ssr'])
+    expect(cfg.proxies[0].plugin).toBe('obfs')
+    expect(cfg['proxy-groups'][0].proxies).toHaveLength(6)
+    expect(out.warnings).toEqual([])
+
+    // 换成 surge：ssr / vless 不受支持 → 跳过，并且不出现在分组里
+    await app.fetch(
+      new Request(`http://x/api/profiles/${prof.id}`, {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ target: 'surge' }),
+      }),
+    )
+    const surge = await json(await app.fetch(new Request(`http://x/api/profiles/${prof.id}/output`)))
+    expect(surge.ok).toBe(true)
+    expect(surge.warnings).toHaveLength(2)
+    expect(surge.warnings.join('\n')).toContain('surge 不支持 vless 协议，已跳过 1 个节点')
+    expect(surge.config).not.toContain('VL 01')
+  })
+
   it('预览脚本返回前后节点', async () => {
     const sub = await json(
       await app.fetch(

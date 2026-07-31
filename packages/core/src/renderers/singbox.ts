@@ -1,6 +1,7 @@
 import type { ProxyGroupDef, RenderContext } from '../config.js'
 import type { ProxyNode } from '../model.js'
 import { resolveGroupMembers } from './mihomo.js'
+import { filterSupported } from './support.js'
 
 /** 统一节点 → sing-box outbound 对象。 */
 export function nodeToSingbox(n: ProxyNode): Record<string, unknown> {
@@ -26,16 +27,41 @@ export function nodeToSingbox(n: ProxyNode): Record<string, unknown> {
       o.method = n.cipher
       o.password = n.password
       break
+    case 'hysteria':
+      o.type = 'hysteria'
+      o.auth_str = n.password
+      if (n.obfs || n.obfsParam) o.obfs = n.obfsParam || n.obfs
+      if (n.upMbps) o.up_mbps = n.upMbps
+      if (n.downMbps) o.down_mbps = n.downMbps
+      break
     case 'hysteria2':
       o.type = 'hysteria2'
       o.password = n.password
       if (n.obfs) o.obfs = { type: n.obfs, ...(n.obfsPassword ? { password: n.obfsPassword } : {}) }
+      if (n.upMbps) o.up_mbps = n.upMbps
+      if (n.downMbps) o.down_mbps = n.downMbps
       break
     case 'tuic':
       o.type = 'tuic'
       o.uuid = n.uuid
       o.password = n.password
       if (n.congestion) o.congestion_control = n.congestion
+      if (n.protocol) o.udp_relay_mode = n.protocol
+      break
+    case 'socks5':
+      o.type = 'socks'
+      o.version = '5'
+      if (n.username) o.username = n.username
+      if (n.password) o.password = n.password
+      break
+    case 'http':
+      o.type = 'http'
+      if (n.username) o.username = n.username
+      if (n.password) o.password = n.password
+      break
+    case 'anytls':
+      o.type = 'anytls'
+      o.password = n.password
       break
   }
 
@@ -112,7 +138,8 @@ export function clashRuleToSingbox(rule: string): { obj?: Record<string, unknown
 
 /** 渲染为 sing-box JSON（best-effort，覆盖常见协议与规则类型）。 */
 export function renderSingbox(ctx: RenderContext): string {
-  const { nodes, profile } = ctx
+  const { profile } = ctx
+  const nodes = filterSupported(ctx.nodes, 'singbox', ctx.warnings)
   const nodeNames = nodes.map((n) => n.name)
   const proxyOutbounds = nodes.map(nodeToSingbox)
   const groupOutbounds = profile.groups.map((g) => groupToOutbound(g, nodeNames))

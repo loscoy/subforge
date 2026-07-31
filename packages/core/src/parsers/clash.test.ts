@@ -32,8 +32,18 @@ proxies:
     port: 8388
     cipher: aes-256-gcm
     password: ss-pw
-  - name: "不支持"
+  - name: "SSR 节点"
     type: ssr
+    server: ssr.example.com
+    port: 1234
+    cipher: aes-256-cfb
+    password: ssr-pw
+    protocol: auth_aes128_md5
+    protocol-param: 1234:abc
+    obfs: tls1.2_ticket_auth
+    obfs-param: cloud.example.com
+  - name: "不支持"
+    type: vmess1
     server: x.com
     port: 1
 proxy-groups:
@@ -44,7 +54,7 @@ proxy-groups:
 describe('parseClashYaml', () => {
   it('解析 Clash YAML proxies，跳过不支持类型', () => {
     const nodes = parseClashYaml(CLASH_YAML)
-    expect(nodes).toHaveLength(3) // ssr 被跳过
+    expect(nodes).toHaveLength(4) // 未知的 vmess1 被跳过
     const vmess = nodes[0]!
     expect(vmess.type).toBe('vmess')
     expect(vmess.name).toBe('🇭🇰 香港 01')
@@ -63,6 +73,13 @@ describe('parseClashYaml', () => {
     const ss = nodes[2]!
     expect(ss.type).toBe('ss')
     expect(ss.cipher).toBe('aes-256-gcm')
+
+    const ssr = nodes[3]!
+    expect(ssr.type).toBe('ssr')
+    expect(ssr.protocol).toBe('auth_aes128_md5')
+    expect(ssr.protocolParam).toBe('1234:abc')
+    expect(ssr.obfs).toBe('tls1.2_ticket_auth')
+    expect(ssr.obfsParam).toBe('cloud.example.com')
   })
 
   it('非 Clash / 无 proxies 返回空', () => {
@@ -72,7 +89,7 @@ describe('parseClashYaml', () => {
 
   it('parseSubscription 自动识别 Clash YAML 订阅', () => {
     const nodes = parseSubscription(CLASH_YAML)
-    expect(nodes).toHaveLength(3)
+    expect(nodes).toHaveLength(4)
     expect(nodes[0]!.type).toBe('vmess')
   })
 

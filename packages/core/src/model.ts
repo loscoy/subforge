@@ -10,10 +10,16 @@ export type ProxyType =
   | 'vless'
   | 'trojan'
   | 'ss'
+  | 'ssr'
+  | 'hysteria'
   | 'hysteria2'
   | 'tuic'
+  | 'socks5'
+  | 'http'
+  | 'snell'
+  | 'anytls'
 
-export type Network = 'tcp' | 'ws' | 'grpc' | 'http' | 'h2'
+export type Network = 'tcp' | 'ws' | 'grpc' | 'http' | 'h2' | 'httpupgrade'
 
 /** 传输层（ws/grpc/http）相关配置，各协议共用。 */
 export interface Transport {
@@ -67,19 +73,40 @@ export interface ProxyNode {
   /** 认证凭据：vmess/vless 用 uuid；trojan/ss 用 password */
   uuid?: string
   password?: string
+  /** socks5 / http 的认证用户名 */
+  username?: string
 
   /** vmess alterId */
   alterId?: number
-  /** vmess/vless cipher / encryption；ss 为加密方式 */
+  /** vmess/vless cipher / encryption；ss / ssr 为加密方式 */
   cipher?: string
   /** vless flow，如 xtls-rprx-vision */
   flow?: string
 
-  /** hysteria2 / tuic 等的额外协议字段（obfs、congestion 等） */
+  /** hysteria2 / snell / ssr 的混淆方式；ssr 为 obfs 插件名 */
   obfs?: string
   obfsPassword?: string
+  /** ssr obfsparam；hysteria v1 的 obfs 字符串 */
+  obfsParam?: string
+  /** snell obfs host；ss obfs 插件的 obfs-host */
+  obfsHost?: string
+  /** ssr protocol 插件；hysteria v1 的传输协议（udp / wechat-video / faketcp） */
+  protocol?: string
+  /** ssr protoparam */
+  protocolParam?: string
   /** tuic congestion controller */
   congestion?: string
+  /** snell 版本（1/2/3/4） */
+  version?: number
+  /** hysteria v1 带宽（Mbps） */
+  upMbps?: number
+  downMbps?: number
+  /** hysteria / hysteria2 端口跳跃，如 "443,8000-9000"；为空表示只用 port */
+  ports?: string
+
+  /** ss SIP002 plugin（obfs / v2ray-plugin / shadow-tls …）及其参数 */
+  plugin?: string
+  pluginOpts?: Record<string, string>
 
   udp?: boolean
   tls?: TlsOptions

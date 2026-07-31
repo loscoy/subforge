@@ -15,7 +15,7 @@ interface TlsOptions {
   realityShortId?: string
 }
 interface Transport {
-  network?: 'tcp' | 'ws' | 'grpc' | 'http' | 'h2'
+  network?: 'tcp' | 'ws' | 'grpc' | 'http' | 'h2' | 'httpupgrade'
   path?: string
   host?: string
   serviceName?: string
@@ -30,17 +30,28 @@ interface NodeMeta {
 }
 interface ProxyNode {
   name: string
-  type: 'vmess' | 'vless' | 'trojan' | 'ss' | 'hysteria2' | 'tuic'
+  type: 'vmess' | 'vless' | 'trojan' | 'ss' | 'ssr' | 'hysteria' | 'hysteria2' | 'tuic' | 'socks5' | 'http' | 'snell' | 'anytls'
   server: string
   port: number
   uuid?: string
   password?: string
+  username?: string
   alterId?: number
   cipher?: string
   flow?: string
   obfs?: string
   obfsPassword?: string
+  obfsParam?: string
+  obfsHost?: string
+  protocol?: string
+  protocolParam?: string
   congestion?: string
+  version?: number
+  upMbps?: number
+  downMbps?: number
+  ports?: string
+  plugin?: string
+  pluginOpts?: Record<string, string>
   udp?: boolean
   tls?: TlsOptions
   transport?: Transport

@@ -1,6 +1,20 @@
 import * as yaml from 'js-yaml'
 import type { ProxyGroupDef, RenderContext } from '../config.js'
-import type { ProxyNode } from '../model.js'
+import type { ProxyNode, ProxyType } from '../model.js'
+import { filterSupported } from './support.js'
+
+/** 协议自带 TLS，mihomo 里不写 `tls: true`。 */
+const TLS_IMPLICIT: ReadonlySet<ProxyType> = new Set<ProxyType>(['hysteria', 'hysteria2', 'tuic', 'anytls'])
+
+/** mihomo 里用 `sni` 而非 `servername` 表达 SNI 的协议。 */
+const SNI_TYPES: ReadonlySet<ProxyType> = new Set<ProxyType>([
+  'vless',
+  'trojan',
+  'hysteria',
+  'hysteria2',
+  'tuic',
+  'anytls',
+])
 
 /** 把统一节点转换为 Mihomo proxy 对象。 */
 export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
@@ -28,6 +42,27 @@ export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
     case 'ss':
       base.cipher = n.cipher
       base.password = n.password
+      if (n.plugin) {
+        base.plugin = n.plugin
+        if (n.pluginOpts && Object.keys(n.pluginOpts).length) base['plugin-opts'] = { ...n.pluginOpts }
+      }
+      break
+    case 'ssr':
+      base.cipher = n.cipher
+      base.password = n.password
+      base.protocol = n.protocol
+      if (n.protocolParam) base['protocol-param'] = n.protocolParam
+      base.obfs = n.obfs
+      if (n.obfsParam) base['obfs-param'] = n.obfsParam
+      break
+    case 'hysteria':
+      base['auth-str'] = n.password
+      if (n.protocol) base.protocol = n.protocol
+      if (n.obfs) base.obfs = n.obfs
+      if (n.obfsParam) base['obfs-param'] = n.obfsParam
+      if (n.upMbps) base.up = `${n.upMbps} Mbps`
+      if (n.downMbps) base.down = `${n.downMbps} Mbps`
+      if (n.ports) base.ports = n.ports
       break
     case 'hysteria2':
       base.password = n.password
@@ -35,17 +70,37 @@ export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
         base.obfs = n.obfs
         if (n.obfsPassword) base['obfs-password'] = n.obfsPassword
       }
+      if (n.ports) base.ports = n.ports
+      if (n.upMbps) base.up = `${n.upMbps} Mbps`
+      if (n.downMbps) base.down = `${n.downMbps} Mbps`
       break
     case 'tuic':
       base.uuid = n.uuid
       base.password = n.password
       if (n.congestion) base['congestion-controller'] = n.congestion
+      if (n.protocol) base['udp-relay-mode'] = n.protocol
+      break
+    case 'socks5':
+    case 'http':
+      if (n.username) base.username = n.username
+      if (n.password) base.password = n.password
+      break
+    case 'snell':
+      base.psk = n.password
+      if (n.version) base.version = n.version
+      if (n.obfs) {
+        base['obfs-opts'] = { mode: n.obfs, ...(n.obfsHost ? { host: n.obfsHost } : {}) }
+      }
+      break
+    case 'anytls':
+      base.password = n.password
       break
   }
 
   // TLS
   if (n.tls?.enabled) {
-    base.tls = true
+    // hysteria / tuic / anytls 本身就是 TLS 协议，mihomo 不接受多余的 tls 字段
+    if (!TLS_IMPLICIT.has(n.type)) base.tls = true
     if (n.tls.sni) base.servername = n.tls.sni
     if (n.tls.alpn) base.alpn = n.tls.alpn
     if (n.tls.skipCertVerify) base['skip-cert-verify'] = true
@@ -57,8 +112,8 @@ export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
       }
     }
   }
-  // vless/trojan 的 sni 用 sni 字段
-  if ((n.type === 'vless' || n.type === 'trojan') && n.tls?.sni) {
+  // 这些协议在 mihomo 里用 sni 而不是 servername
+  if (SNI_TYPES.has(n.type) && n.tls?.sni) {
     base.sni = n.tls.sni
     delete base.servername
   }
@@ -121,7 +176,8 @@ export function resolveGroupMembers(group: ProxyGroupDef, nodeNames: string[]): 
 
 /** 渲染为 Mihomo/Clash YAML 文本。 */
 export function renderMihomo(ctx: RenderContext): string {
-  const { nodes, profile } = ctx
+  const { profile } = ctx
+  const nodes = filterSupported(ctx.nodes, 'mihomo', ctx.warnings)
   const proxies = nodes.map(nodeToMihomo)
   const nodeNames = nodes.map((n) => n.name)
 
