@@ -167,6 +167,7 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 
 ## Cloudflare 部署的坑
 
+- **优先走 CI 发布**：`.github/workflows/deploy.yml`，合并到 `main` 自动跑「typecheck + test → 构建 → D1 迁移 → 部署」，也可在 Actions 页手动触发。本地 wrangler 报 520/522（`Received a malformed response from the API`）几乎都是本机到 `api.cloudflare.com` 的链路问题，与仓库配置无关，走 CI 直接绕开。三个 secret 见 `docs/DEPLOY_CLOUDFLARE.md`。
 - **必须用 `npm run cf:release`**，不要直接 `wrangler deploy`。仓库里的 `wrangler.jsonc` 存的是占位符 `REPLACE_WITH_YOUR_D1_ID`；真实 account_id / database_id 放在 gitignored 的 `packages/server/.cf-release.json`（或环境变量）。该脚本临时注入 id → 构建 → 拷贝 wasm → 应用 D1 远程迁移 → 部署 → **无论成败都还原占位符**。真实 id 绝不能进仓库。
 - **QuickJS wasm 必须内联进 worker**：workerd 禁止运行时从字节编译 wasm。`scripts/copy-quickjs-wasm.mjs` 把 `.wasm` 拷到 `src/quickjs.wasm`（gitignored，属生成物），`worker.ts` 以 `CompiledWasm` 形式 import 并通过 `newVariant(releaseSyncVariant, { wasmModule })` 注入。不要改回运行时加载。
 - `QuickJsRunner` 实例放在 **worker 模块作用域**（非 `fetch` 内），让 WASM 模块在同一 isolate 内跨请求复用。
