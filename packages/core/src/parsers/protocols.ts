@@ -31,6 +31,9 @@ function splitFirst(s: string, sep: string): [string, string] {
 
 /** query 里的「跳过证书校验」有一堆别名，统一在这里认。 */
 function insecureOf(q: URLSearchParams): boolean {
+  // Shadowrocket 反着写：verify_cert=0 等价于 skip-cert-verify=1
+  const verifyCert = pick(q, 'verify_cert', 'verify-cert')
+  if (verifyCert !== undefined && !truthy(verifyCert)) return true
   return (
     truthy(q.get('insecure')) ||
     truthy(q.get('allowInsecure')) ||
@@ -55,6 +58,9 @@ function normalizeNetwork(raw: string | undefined): Network {
       return 'h2'
     case 'http':
       return 'http'
+    case 'wss':
+      // Shadowrocket / QX 用 wss 同时表达「ws + TLS」，传输层部分就是 ws
+      return 'ws'
     case 'httpupgrade':
       return 'httpupgrade'
     default:
@@ -63,14 +69,55 @@ function normalizeNetwork(raw: string | undefined): Network {
   }
 }
 
+/**
+ * 从 query 里认出传输层。同一件事各家写在不同参数上，而且会互相打架：
+ * - XRay VMessAEAD URI：`type=ws`
+ * - v2rayN 把 JSON 字段塞进 query：`net=ws` + `type=none`（这里 type 是 header 混淆类型，不是传输）
+ * - Shadowrocket：`obfs=websocket` / `obfs=http`
+ *
+ * 所以不能按固定优先级取第一个存在的键——`type=none` 会把真正的 `net=ws` 盖掉，
+ * 节点静默退化成 tcp。改成挨个试，取第一个能解析出非 tcp 传输的值。
+ */
+function networkFromQuery(q: URLSearchParams): Network {
+  for (const key of ['net', 'type', 'obfs']) {
+    const raw = q.get(key)
+    if (!raw) continue
+    const net = normalizeNetwork(raw)
+    if (net !== 'tcp') return net
+  }
+  return 'tcp'
+}
+
 /** 从 query 构造传输层配置；tcp 返回 undefined（无需额外字段）。 */
+/**
+ * Shadowrocket 的 `obfsParam` 有两种写法：光秃秃一个域名，或者一整个
+ * `{"Host":"..."}` JSON。两种都要认，认不出就当普通域名用。
+ */
+function hostFromObfsParam(raw: string): string {
+  if (!raw.trimStart().startsWith('{')) return raw
+  try {
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed && typeof parsed === 'object') {
+      const h = (parsed as Record<string, unknown>).Host ?? (parsed as Record<string, unknown>).host
+      if (typeof h === 'string' && h) return h
+    }
+  } catch {
+    // 不是合法 JSON，按域名处理
+  }
+  return raw
+}
+
 function transportFromQuery(net: Network, q: URLSearchParams): Transport | undefined {
   if (net === 'tcp') return undefined
-  const host = pick(q, 'host', 'sni')
+  // obfsParam 是 Shadowrocket 放 Host 头的地方，漏掉它节点连不上（服务端按 Host 分流）
+  const rawHost = pick(q, 'host', 'sni')
+  const obfsParam = pick(q, 'obfsParam', 'obfs-param', 'obfs_param')
+  const host = rawHost ?? (obfsParam ? hostFromObfsParam(obfsParam) : undefined)
   const path = pick(q, 'path')
   return {
     network: net,
-    path,
+    // ws 不给 path 时默认 `/`，与各客户端行为一致；留空会被服务端拒
+    path: net === 'ws' ? path || '/' : path,
     // host 可能是逗号分隔的多个域名，取第一个
     host: host ? host.split(',')[0]!.trim() : undefined,
     // grpc 的 serviceName 在不同客户端里分别写在 serviceName / path
@@ -81,7 +128,19 @@ function transportFromQuery(net: Network, q: URLSearchParams): Transport | undef
 /** 从 query 构造 TLS 配置。`force` 用于 trojan/anytls 这类天然强制 TLS 的协议。 */
 function tlsFromQuery(q: URLSearchParams, force = false): TlsOptions | undefined {
   const security = (pick(q, 'security') || '').toLowerCase()
-  const on = force || security === 'tls' || security === 'reality' || security === 'xtls'
+  // Shadowrocket / v2rayN 不写 security，而是 `tls=1`（或 tls=tls）；QX 用 `obfs=wss`。
+  // 漏认这几种，节点会被当明文发出去——服务端直接拒握手，表现为「节点全部不可用」。
+  // 注意 truthy('') 为 true，所以必须先判断参数存在（pick 不会返回空串）
+  const tlsParam = pick(q, 'tls')?.toLowerCase()
+  const obfs = pick(q, 'obfs')?.toLowerCase()
+  const on =
+    force ||
+    security === 'tls' ||
+    security === 'reality' ||
+    security === 'xtls' ||
+    (tlsParam !== undefined && (tlsParam === 'tls' || truthy(tlsParam))) ||
+    obfs === 'wss' ||
+    obfs === 'tls'
   if (!on) return undefined
   const tls: TlsOptions = { enabled: true }
   const sni = pick(q, 'sni', 'peer', 'servername', 'host')
@@ -244,7 +303,49 @@ export function parseSsr(body: string): ProxyNode | null {
  * 3. `vmess://base64(security:uuid@host:port)?…#name`（Shadowrocket）
  */
 export function parseVmess(body: string): ProxyNode | null {
-  return parseVmessJson(body) ?? parseVmessUri(body)
+  return parseVmessJson(body) ?? parseVmessShadowrocket(body) ?? parseVmessUri(body)
+}
+
+/**
+ * Shadowrocket 形态：`vmess://base64(security:uuid@host:port)?path=…&obfs=…&remarks=…`
+ *
+ * 注意与下面 parseVmessUri 的区别——这里是**整串** `security:uuid@host:port` 一起 base64，
+ * 密文里没有可见的 `@`，走通用 URI 拆分只会把整个 base64 当成主机名，uuid 为空直接返回 null，
+ * 于是这类节点被静默丢弃（这正是「节点解析不出来」的典型现场）。
+ */
+function parseVmessShadowrocket(body: string): ProxyNode | null {
+  const cut = body.search(/[?#]/)
+  // 末尾可能有个多余的 `/`（Shadowrocket 会带）
+  const head = (cut < 0 ? body : body.slice(0, cut)).replace(/\/+$/, '')
+  if (!head) return null
+  let decoded: string
+  try {
+    decoded = b64decode(head)
+  } catch {
+    return null
+  }
+  // security:uuid@host:port —— host 用贪婪匹配兜住 IPv6 里的冒号
+  const m = /^([^:@]*):([^@]+)@(.+):(\d+)$/.exec(decoded.trim())
+  if (!m) return null
+  const [, cipher, uuid, rawHost, rawPort] = m
+  if (!uuid) return null
+  const port = Number(rawPort)
+  if (!Number.isFinite(port) || port <= 0) return null
+
+  const qs = cut >= 0 && body[cut] === '?' ? body.slice(cut + 1).split('#')[0]! : ''
+  const q = new URLSearchParams(qs)
+  const net = networkFromQuery(q)
+  return makeNode({
+    name: decodeNameFragment(body) || pick(q, 'remarks', 'remark', 'ps') || `${rawHost}:${port}`,
+    type: 'vmess',
+    server: rawHost!.replace(/^\[|\]$/g, ''),
+    port,
+    uuid,
+    alterId: Number(pick(q, 'alterId', 'aid') ?? 0) || 0,
+    cipher: cipher && cipher !== 'none' ? cipher : 'auto',
+    tls: tlsFromQuery(q),
+    transport: transportFromQuery(net, q),
+  })
 }
 
 function parseVmessJson(body: string): ProxyNode | null {
@@ -323,9 +424,11 @@ function parseVmessUri(body: string): ProxyNode | null {
   }
   if (!uuid) return null
 
-  const net = normalizeNetwork(pick(q, 'type', 'net', 'obfs'))
+  const net = networkFromQuery(q)
   return makeNode({
-    name: parts.name || `${parts.host}:${parts.port}`,
+    // Shadowrocket 把节点名放在 remarks 而不是 `#fragment`。漏认的话整份订阅的节点
+    // 会全部退化成 `ip:port`，地区分组 / 正则过滤跟着一起失效。
+    name: parts.name || pick(q, 'remarks', 'remark', 'ps') || `${parts.host}:${parts.port}`,
     type: 'vmess',
     server: parts.host,
     port: parts.port,

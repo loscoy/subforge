@@ -95,6 +95,60 @@ describe('vmess', () => {
     expect(n.transport?.network).toBe('ws')
   })
 
+  // 整串 security:uuid@host:port 一起 base64（密文里看不到 @），是 Shadowrocket
+  // 最常见的导出形态。历史上走通用 URI 拆分会把整个 base64 当主机名、uuid 为空，
+  // 于是整批节点被静默丢弃。
+  describe('Shadowrocket 整串 base64 形式', () => {
+    const body = b64('auto:b14947da-1a2b-3c4d-5e6f-7890bccfb8d0@69.63.221.10:80')
+
+    it('obfs=http + obfsParam：认出传输层与 Host', () => {
+      const n = parseUri(`vmess://${body}?path=/video&remarks=US-AI&obfsParam=videohw.cdn.example.com&obfs=http&alterId=0`)!
+      expect(n.type).toBe('vmess')
+      expect(n.server).toBe('69.63.221.10')
+      expect(n.port).toBe(80)
+      expect(n.uuid).toBe('b14947da-1a2b-3c4d-5e6f-7890bccfb8d0')
+      // 节点名在 remarks 里而不是 #fragment，漏认会退化成 ip:port
+      expect(n.name).toBe('US-AI')
+      expect(n.transport?.network).toBe('http')
+      expect(n.transport?.path).toBe('/video')
+      // obfsParam 是 Shadowrocket 放 Host 的地方，漏掉节点连不上
+      expect(n.transport?.host).toBe('videohw.cdn.example.com')
+    })
+
+    it('tls=1 开启 TLS（不是 security=tls）', () => {
+      const n = parseUri(`vmess://${body}?obfs=websocket&tls=1&remarks=HK`)!
+      expect(n.tls?.enabled).toBe(true)
+    })
+
+    it('verify_cert=0 反着表达跳过证书校验', () => {
+      const n = parseUri(`vmess://${body}?tls=1&verify_cert=0&remarks=X`)!
+      expect(n.tls?.skipCertVerify).toBe(true)
+    })
+
+    it('obfsParam 写成 JSON 时取其中的 Host', () => {
+      const n = parseUri(`vmess://${body}?obfs=websocket&obfsParam=${encodeURIComponent('{"Host":"a.example.com"}')}`)!
+      expect(n.transport?.host).toBe('a.example.com')
+    })
+
+    it('ws 缺 path 时补默认 /', () => {
+      const n = parseUri(`vmess://${body}?obfs=websocket`)!
+      expect(n.transport?.path).toBe('/')
+    })
+
+    it('末尾多余的 / 不影响解析，#fragment 优先于 remarks', () => {
+      const n = parseUri(`vmess://${body}/?remarks=Ignored&obfs=websocket#${encodeURIComponent('香港01')}`)!
+      expect(n.name).toBe('香港01')
+    })
+  })
+
+  it('type=none 不会盖掉真正的 net=ws', () => {
+    // v2rayN 把 JSON 字段塞进 query 时 type 是 header 混淆类型而非传输层，
+    // 按固定优先级取第一个存在的键会让节点静默退化成 tcp
+    const n = parseUri(`vmess://u-9@a.com:443?net=ws&type=none&path=%2Fp&host=h.com&security=tls#M`)!
+    expect(n.transport?.network).toBe('ws')
+    expect(n.transport?.host).toBe('h.com')
+  })
+
   it('port 为数字、host 为逗号分隔时取第一个', () => {
     const conf = { ps: 'X', add: 'a.com', port: 443, id: 'u1', net: 'ws', host: 'h1.com,h2.com', tls: 'tls' }
     const n = parseUri(`vmess://${b64(JSON.stringify(conf))}`)!
