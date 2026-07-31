@@ -1,9 +1,55 @@
 import { generateText, stepCountIs, streamText, tool, type LanguageModel, type ModelMessage } from 'ai'
 import { buildTools, type Tool, type ToolContext } from '../tools/registry.js'
+import type { ContextMessage } from './context.js'
 import { createAgentModel } from './model.js'
 import { MemoryManager } from './memory.js'
 import type { AgentEvent, AgentModelConfig, AgentReply, AgentRunner, AgentStep } from './runner.js'
+import { makeSummarizer } from './summarize.js'
 import { buildWebCapability, type WebCapability } from './webTools.js'
+
+/**
+ * 把装配好的历史转成 AI SDK 的消息格式。
+ *
+ * 关键点是把工具调用还原成 assistant(tool-call) + tool(tool-result) 消息对：
+ * 只喂正文的话，模型对上一轮自己读到过什么、写下过什么完全失忆，
+ * 只能从自己那段总结文字里回忆，read-before-write 拿到的指纹更是一轮就没。
+ * 同一轮的多次调用合并成一组，顺序与原始调用顺序一致。
+ */
+export function toModelMessages(history: ContextMessage[]): ModelMessage[] {
+  const out: ModelMessage[] = []
+  for (const m of history) {
+    if (m.role === 'user') {
+      out.push({ role: 'user', content: m.content })
+      continue
+    }
+    const calls = m.calls ?? []
+    if (calls.length) {
+      out.push({
+        role: 'assistant',
+        content: calls.map((c) => ({
+          type: 'tool-call' as const,
+          toolCallId: c.id,
+          toolName: c.tool,
+          input: c.args ?? {},
+        })),
+      })
+      out.push({
+        role: 'tool',
+        content: calls.map((c) => ({
+          type: 'tool-result' as const,
+          toolCallId: c.id,
+          toolName: c.tool,
+          output:
+            c.error !== undefined
+              ? ({ type: 'error-text', value: c.error } as const)
+              : ({ type: 'json', value: (c.result ?? null) as never } as const),
+        })),
+      })
+    }
+    out.push({ role: 'assistant', content: m.content })
+  }
+  return out
+}
 
 /**
  * 基于 Vercel AI SDK 的 AgentRunner 实现。
@@ -20,7 +66,8 @@ export class AiSdkAgentRunner implements AgentRunner {
     private readonly maxSteps = 10,
     private readonly modelFactory?: () => LanguageModel,
   ) {
-    this.memory = new MemoryManager(toolCtx.storage)
+    // 压缩用同一套模型配置（无工具的单次请求）；失败/超时只会退化成「旧对话被省略」，不影响本轮
+    this.memory = new MemoryManager(toolCtx.storage, { summarize: makeSummarizer(config, modelFactory) })
     this.webCap = config.webTools ? buildWebCapability(config.webTools) : undefined
   }
 
@@ -38,10 +85,7 @@ export class AiSdkAgentRunner implements AgentRunner {
 
     const { system: baseSystem, history } = await this.memory.loadContext(threadId)
     const system = this.withWebHint(context ? `${baseSystem}\n\n# 当前上下文\n${context}` : baseSystem)
-    const messages: ModelMessage[] = [
-      ...history.map((h) => ({ role: h.role, content: h.content }) as ModelMessage),
-      { role: 'user', content: userMessage },
-    ]
+    const messages: ModelMessage[] = [...toModelMessages(history), { role: 'user', content: userMessage }]
 
     const steps: AgentStep[] = []
     const { text } = await generateText({
@@ -104,10 +148,7 @@ export class AiSdkAgentRunner implements AgentRunner {
     const model = this.makeModel(threadId)
     const { system: base, history } = await this.memory.loadContext(threadId)
     const system = this.withWebHint(context ? `${base}\n\n# 当前上下文\n${context}` : base)
-    const messages: ModelMessage[] = [
-      ...history.map((h) => ({ role: h.role, content: h.content }) as ModelMessage),
-      { role: 'user', content: userMessage },
-    ]
+    const messages: ModelMessage[] = [...toModelMessages(history), { role: 'user', content: userMessage }]
 
     const result = streamText({
       model,
@@ -161,6 +202,25 @@ export class AiSdkAgentRunner implements AgentRunner {
       // 已经流出的文本 / 工具步骤照常在下面落库，前端也保留已显示的部分。
       if (!signal?.aborted) {
         yield { type: 'error', error: e instanceof Error ? e.message : String(e) }
+      }
+    }
+
+    // 撞上步数上限（stopWhen）：模型还想接着调工具，被我们截停，于是这一轮
+    // 只有一串工具卡、正文一个字都没有——在界面上就是「莫名其妙停住 + 一个空气泡」。
+    // 补一句说明，把「为什么停」和「怎么继续」交代清楚。
+    // 只在既没正文、又确实是被工具调用截断时补；用户主动停止不算。
+    if (!finalText && steps.size && !signal?.aborted) {
+      // finishReason 是 PromiseLike，没有 .catch；流异常收尾时它也可能 reject
+      let finishReason: string | undefined
+      try {
+        finishReason = await result.finishReason
+      } catch {
+        finishReason = undefined
+      }
+      if (finishReason === 'tool-calls') {
+        finalText = `（这一轮连续调用工具已达上限 ${this.maxSteps} 步，我先停在这里，没有继续往下做。`
+          + `如果还没弄完，回我一句「继续」就行；如果看起来在反复做同一件事，告诉我，我换个思路。）`
+        yield { type: 'text', delta: finalText }
       }
     }
 
