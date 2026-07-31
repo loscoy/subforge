@@ -42,6 +42,56 @@ npm run cf:release
 > `SETTINGS_KEY` 换掉之后，D1 里已存的密钥（模型 API Key、MCP 口令）会全部解不开，
 > 需要在「设置」页重填一次。Agent 与远端 MCP 在此期间失败关闭，不会带着半截配置乱跑。
 
+## 用 GitHub Actions 发布（推荐）
+
+`.github/workflows/deploy.yml`：合并到 `main` 后自动跑「typecheck + test → 构建 → D1 迁移 → 部署」，也可以在 Actions 页面手动触发。
+
+从 GitHub 的机器出网，**不受本地网络影响**——本地 wrangler 频繁报 520/522（`Received a malformed response from the API`）时基本都是本机到 `api.cloudflare.com` 的链路问题，走 CI 可以直接绕开。判断方法：
+
+```bash
+for i in 1 2 3 4 5; do curl -sS -m 15 -o /dev/null -w "%{http_code} %{time_total}s\n" https://api.cloudflare.com/client/v4/user/tokens/verify; done
+```
+
+五次都返回 `400` 才算链路正常（400 是预期的，表示打通了只是没带鉴权）；出现 5xx 或超时就说明该走 CI 或换出口节点。
+
+在仓库 Settings → Secrets and variables → Actions 配三个 secret：
+
+| Secret | 说明 |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | 权限需要 Workers Scripts:Edit + D1:Edit + Account Settings:Read |
+| `CLOUDFLARE_ACCOUNT_ID` | 账号 id |
+| `D1_DATABASE_ID` | `wrangler d1 create subforge` 生成的库 id |
+
+注意：
+
+- 这三个都不进仓库，`wrangler.jsonc` 里存的仍是占位符。工作流最后会校验占位符已还原、`git diff` 为空，防止将来改坏还原逻辑把真实 id 带进提交。
+- `SETTINGS_KEY` 一类的 **Worker secret 不放 CI**，用 `wrangler secret put` 单独设置一次即可，重新部署会保留。
+- 想改成「合并后等人点确认再发布」：Settings → Environments → `production` 加 required reviewers。不加则保持自动发布。
+
+### 公开仓库的安全边界
+
+本仓库是公开的，自动部署又持有生产环境的 token，所以触发条件是刻意选的：
+
+**只用 `push: main` 与 `workflow_dispatch`，两者都要求仓库写权限。** 来自 fork 的 `pull_request` 按 GitHub 规则**一律不下发 secret**，所以陌生人开 PR 改工作流去偷 token 这条路是堵死的。
+
+> ⚠️ 绝不要为了「给 PR 也跑一次部署」而加 `pull_request_target` 或 `issue_comment` 触发器。
+> 这两个会**带着 secret 执行 PR 分支上的代码**，等于把 token 交给任何能开 PR 的人。这是 GitHub Actions 最经典的一类提权漏洞。
+
+真正的风险不在陌生人，而在**你自己合并了别人的 PR**——那份代码会自动带着 token 在 CI 里跑。改 `package-lock.json` 指向一个恶意包就够了，不需要动工作流。所以：
+
+- 接受外部贡献前，`package-lock.json` 的改动要单独看一眼
+- 一旦开始收外部 PR，就该给 `production` 环境加 required reviewers
+- 建议保护 `main` 分支（要求 PR、禁止 force push），否则任何拿到写权限的途径都能直接推上去触发部署
+
+工作流内部已做的收敛：
+
+- `permissions: contents: read`——工作流不写仓库任何东西
+- `persist-credentials: false`——不把 `GITHUB_TOKEN` 落到 `.git/config`，构建期的任意代码就少一个可偷的凭据
+- secret 只出现在真正需要它的发布步骤；「检查是否齐全」那步拿到的是布尔值而非明文
+- `npm ci` 单独成步，运行时环境里没有 token
+
+Cloudflare token 侧建议：设过期时间，权限只勾 Workers Scripts:Edit + D1:Edit + Account Settings:Read，并在 token 编辑页把资源范围限定到这一个账号（可能的话限定到 `subforge` 这一个 Worker 与这一个 D1）。万一泄漏，影响面就只有这个项目。
+
 ## 说明与限制
 
 - **脚本沙箱**：边缘用 QuickJS-wasm，**仅支持同步脚本**（不支持 `await`）；`utils` 通过 host 桥调用与 Node 端完全相同的实现（跨桥参数走 JSON，故正则请用字符串形式传给 `utils.keep/drop`）。
