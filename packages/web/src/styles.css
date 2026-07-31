@@ -627,6 +627,12 @@ body {
   border-bottom: 1px solid var(--sf-border-subtle);
   overflow-x: auto;
   scrollbar-width: none;
+  /* 标签放不下时横向滚动，但绝不能被纵向压扁。
+     一旦成为滚动容器，min-height: auto 就按规范解析成 0，填充布局里
+     纵向空间一紧张它会被 flex 压到只剩几像素，标签文字溢出到框外、
+     被后画的工作区盖住。这两行是 overflow-x: auto 的必要配套。 */
+  flex: 0 0 auto;
+  min-height: fit-content;
 }
 .section-tabs::-webkit-scrollbar {
   display: none;
