@@ -10,7 +10,18 @@
 # 这三个都不进仓库：wrangler.jsonc 里存的是占位符，cf:release 在构建前临时注入、
 # 结束后无论成败都还原。SETTINGS_KEY 一类的 Worker secret 用 `wrangler secret put`
 # 单独设置，重新部署会保留，不需要放进 CI。
+#
+# 公开仓库的安全边界（改触发条件前务必读）：
+#   只用 push:main 与 workflow_dispatch，这两者都要求仓库写权限，
+#   而来自 fork 的 pull_request 按 GitHub 规则一律拿不到 secret。
+#   ⚠️ 绝对不要为了「给 PR 也跑一次部署」而加 pull_request_target 或
+#   issue_comment —— 那两个触发器会带着 secret 执行 PR 分支上的代码，
+#   等于把 token 交给任何能开 PR 的人。
 name: Deploy to Cloudflare
+
+# 最小权限：这个工作流不需要写仓库任何东西
+permissions:
+  contents: read
 
 on:
   push:
@@ -34,6 +45,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 不把 GITHUB_TOKEN 写进 .git/config：本工作流不推任何东西，
+          # 少一个凭据留在磁盘上，构建期的任意代码就少一个可偷的东西
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -51,22 +66,28 @@ jobs:
     environment: production
     steps:
       - uses: actions/checkout@v4
+        with:
+          # 不把 GITHUB_TOKEN 写进 .git/config：本工作流不推任何东西，
+          # 少一个凭据留在磁盘上，构建期的任意代码就少一个可偷的东西
+          persist-credentials: false
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
 
-      # 缺 secret 时给一句人话，而不是让 wrangler 抛一个语焉不详的鉴权错
+      # 缺 secret 时给一句人话，而不是让 wrangler 抛一个语焉不详的鉴权错。
+      # 只把「有没有」的布尔结果放进 env，绝不把 secret 本身带进这一步——
+      # 真正需要它的只有下面的发布步骤，暴露面越小越好。
       - name: 检查 secret 是否齐全
         env:
-          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          DB: ${{ secrets.D1_DATABASE_ID }}
+          TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+          ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID != '' }}
+          DB: ${{ secrets.D1_DATABASE_ID != '' }}
         run: |
           missing=""
-          [ -n "$TOKEN" ]   || missing="$missing CLOUDFLARE_API_TOKEN"
-          [ -n "$ACCOUNT" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
-          [ -n "$DB" ]      || missing="$missing D1_DATABASE_ID"
+          [ "$TOKEN" = "true" ]   || missing="$missing CLOUDFLARE_API_TOKEN"
+          [ "$ACCOUNT" = "true" ] || missing="$missing CLOUDFLARE_ACCOUNT_ID"
+          [ "$DB" = "true" ]      || missing="$missing D1_DATABASE_ID"
           if [ -n "$missing" ]; then
             echo "::error::缺少仓库 secret：$missing"
             echo "到 Settings → Secrets and variables → Actions 添加后重跑本次工作流。"
