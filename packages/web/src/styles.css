@@ -222,6 +222,9 @@ body {
 }
 .page-body {
   padding: 18px 28px 40px;
+  /* 主内容列自身是查询容器：Agent 面板拉宽后主列被挤窄，但视口仍是桌面尺寸，
+     媒体查询看不见这件事。页面内的多栏布局一律按容器宽度降级（与 .subs-table 同理）。 */
+  container: sfmain / inline-size;
 }
 
 /* ---------- Agent 面板（停靠栏 / 弹窗 双形态） ---------- */
@@ -463,6 +466,7 @@ body {
 .profiles-card {
   display: grid;
   grid-template-columns: 236px minmax(0, 1fr);
+  min-width: 0;
   align-items: stretch;
   padding: 0;
   /* 面板真正浮在凹陷的页面底之上 */
@@ -485,6 +489,33 @@ body {
   min-width: 0;
   display: flex;
   flex-direction: column;
+  /* 详情列再开一层容器：它的宽度 = 卡片宽 − 列表列宽，内部的头部栅格、
+     表单/预览分栏都该按它降级，而不是按主列（更不是按视口）。 */
+  container: sfdetail / inline-size;
+}
+
+/* 主列被挤窄（Agent 面板拉宽 / 小屏）：先收窄列表列，实在放不下再堆叠成上下两段 */
+@container sfmain (max-width: 760px) {
+  .profiles-card {
+    grid-template-columns: 190px minmax(0, 1fr);
+  }
+}
+@container sfmain (max-width: 520px) {
+  .profiles-card {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .profiles-list {
+    border-right: none;
+    border-bottom: 1px solid var(--sf-border-subtle);
+  }
+}
+/* 撑满模式下堆叠时，列表不能把详情的高度吃光——给个上限，超出自己滚 */
+@media (min-width: 48.0625em) {
+  @container sfmain (max-width: 520px) {
+    .app-shell[data-fill] .profiles-list {
+      max-height: 38vh;
+    }
+  }
 }
 /* 撑满模式下左右两栏各自滚，卡片不被内容顶高 */
 @media (min-width: 48.0625em) {
@@ -577,10 +608,28 @@ body {
   gap: 12px;
   align-items: end;
 }
+/* 分享链接是这里最长的东西，宁可让它独占一行，也不要被压成一个方块 */
+@container sfdetail (max-width: 560px) {
+  .profile-head-grid {
+    grid-template-columns: 130px minmax(0, 1fr);
+  }
+}
+@container sfdetail (max-width: 420px) {
+  .profile-head-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
 
 /* 区块 tab */
+/* 一律可横滑：详情列窄到放不下四个 tab 是常态（Agent 面板拉宽即可触发），
+   靠视口断点判断会漏掉这种情况，末尾的 tab 就被裁掉且点不到。 */
 .section-tabs {
   border-bottom: 1px solid var(--sf-border-subtle);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.section-tabs::-webkit-scrollbar {
+  display: none;
 }
 .section-tab {
   display: inline-flex;
@@ -604,6 +653,10 @@ body {
 /* 切换区块时内容淡入上移，不再硬切（reduced-motion 下由文末统一关闭） */
 .section-pane {
   animation: sf-pane-in 200ms cubic-bezier(0.16, 1, 0.3, 1);
+  min-width: 0;
+  /* 表单区自成容器：分栏预览打开后，表单只占详情列的一部分，
+     里面的两列栅格该按「表单实际有多宽」降级。设置页用同名容器（见 .settings-page）。 */
+  container: sfpane / inline-size;
 }
 
 /* ---------- 工作区：表单 | 输出预览 左右分栏 ---------- */
@@ -613,9 +666,11 @@ body {
   min-height: 0;
   min-width: 0;
 }
-/* 宽屏且预览展开时才分栏：表单在左、预览在右，各自独立滚动。
-   预览列用 minmax 保底 320px，配置 YAML 缩到一条线就没意义了。 */
-@media (min-width: 62em) {
+/* 详情列够宽且预览展开时才分栏：表单在左、预览在右，各自独立滚动。
+   预览列用 minmax 保底 320px，配置 YAML 缩到一条线就没意义了。
+   条件必须按详情列宽而非视口：Agent 面板拉宽后视口仍是桌面尺寸，
+   照旧分栏会让 320px 的预览列直接溢出，盖住左边的表单。 */
+@container sfdetail (min-width: 660px) {
   .profile-workspace[data-split] {
     display: grid;
     grid-template-columns: minmax(0, 1fr) minmax(320px, 0.85fr);
@@ -733,6 +788,21 @@ body {
 .proxy-group-delete {
   margin-bottom: 3px;
 }
+/* 两列塞不下就退成一列。按所在表单区（.section-pane / .settings-page）的实际宽度判断，
+   而不是视口——分栏预览打开后表单只占详情列的一半，视口再宽也没用。 */
+@container sfpane (max-width: 440px) {
+  .form-grid-2,
+  .proxy-group-main {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .proxy-group-checkbox,
+  .proxy-group-delete {
+    margin-bottom: 0;
+  }
+  .proxy-group-delete {
+    justify-self: end;
+  }
+}
 .mcp-card {
   display: grid;
   grid-template-columns: minmax(0, 1.1fr) minmax(300px, 0.9fr);
@@ -755,6 +825,8 @@ body {
   max-width: 760px;
   margin-inline: auto;
   width: 100%;
+  /* 与 .section-pane 同名：里面的 .form-grid-2 用同一条容器断点降级 */
+  container: sfpane / inline-size;
 }
 .settings-card-head {
   border-bottom: 1px solid var(--sf-border-subtle);
@@ -835,6 +907,27 @@ body {
 .mcp-tools[data-more] .mcp-tools-fade {
   opacity: 1;
 }
+/* 主列放不下两栏就上下堆叠（Agent 面板拉宽即可触发，视口仍是桌面尺寸）。
+   单列时没有「左栏高度」可对齐，工具列表直接展开随页面滚，也就不需要底部渐隐提示。
+   放在这里而不是 .mcp-card 定义处：这几条要盖住上面的 .mcp-tools-scroll，同优先级下后写的才生效。 */
+@container sfmain (max-width: 940px) {
+  .mcp-card {
+    grid-template-columns: minmax(0, 1fr);
+    min-height: 0;
+  }
+  .mcp-conn {
+    border-right: none;
+    border-bottom: 1px solid var(--sf-border-subtle);
+  }
+  .mcp-tools-scroll {
+    flex: none;
+    height: auto;
+    overflow-y: visible;
+  }
+  .mcp-tools-fade {
+    display: none;
+  }
+}
 .mcp-copy-field {
   position: relative;
   display: grid;
@@ -861,57 +954,68 @@ body {
   flex: 1 1 auto;
   min-height: 0;
 }
+/* 对话区直接铺在面板上：不再套一层凹陷底色的画布。面板本身已经是一层表面，
+   再嵌一个灰盒子只是多一道边框，还白白吃掉两侧的可用宽度。 */
 .chat-log {
   flex: 1;
+  min-width: 0;
   min-height: 0;
-  overflow: auto;
-  /* 对话区是凹陷画布，气泡/工具卡才浮得起来（与主界面「页面底 → 面板」同构） */
-  background: var(--sf-app-background);
-  border: 1px solid var(--sf-border-subtle);
-  border-radius: 8px;
+  overflow-y: auto;
+  /* 横向一律不滚：表格 / 代码块各自是滚动容器，真要溢出也只该它们自己滚，
+     否则整条对话（含已经贴边的用户气泡）会被一起推出可视区。 */
+  overflow-x: hidden;
   /* 必须自成定位上下文：否则内部任何绝对定位元素都会把包含块一路找到
      .agent-drawer（sticky 也算定位元素），逃过这里的 overflow 裁剪，
      按静态位置停在滚动区深处，把整页文档高度撑到上万 px（底下全是空白）。 */
   position: relative;
   /* 滚到顶/底时不把滚动传给背后的页面（手机全屏态尤其明显） */
   overscroll-behavior: contain;
-  padding: 12px 10px;
+  padding: 6px 2px 4px;
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 14px;
 }
 .turn {
   display: flex;
   flex-direction: column;
   gap: 5px;
+  min-width: 0;
 }
 .turn.user {
   align-self: flex-end;
   align-items: flex-end;
   max-width: 82%;
 }
+/* 助手一轮占满整行：面板本来就窄，正文没有理由再让出一截。
+   同时这是宽度收敛的关键——stretch 给了子元素确定宽度，
+   里面的表格 / 代码块才会「自己滚」，而不是把整轮撑到 max-content。 */
 .turn.assistant {
-  align-self: flex-start;
-  align-items: flex-start;
-  max-width: min(92%, 960px);
+  align-self: stretch;
+  align-items: stretch;
+  max-width: 100%;
 }
-/* 与主界面同一套材质语言：正文用「填充卡」，中间过程用「描边卡」，两者靠材质而非颜色区分。 */
 .msg {
   padding: 9px 13px;
   border-radius: 6px;
   font-size: 13.5px;
   line-height: 1.55;
+  min-width: 0;
+  /* 兜底：超长 URL / 无空格长串不许把气泡撑破 */
+  max-width: 100%;
+  overflow-wrap: break-word;
 }
 .msg.user {
   background: linear-gradient(180deg, #8347e6, #7c3aed);
   color: #fff;
   white-space: pre-wrap;
 }
-/* 助手回复=主内容，实心浮起（对话区底色是凹的，它才显得浮） */
+/* 助手回复=主内容，直接排在面板上，不做成卡片：中间过程（.trace）才是描边卡，
+   两者靠「有没有框」区分，比同色卡片叠同色卡片清楚得多。 */
 .msg.assistant {
-  background: var(--sf-surface);
-  border: 1px solid var(--sf-border-subtle);
-  box-shadow: var(--sf-shadow-card);
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
 }
 /* 输入框并入「线框」体系：边框用与卡片一致的中性色，聚焦不再变紫（去掉高亮/毛玻璃错觉） */
 .chat-composer textarea,
@@ -928,10 +1032,11 @@ body {
   flex-direction: column;
   gap: 4px;
 }
+/* 对话区去掉灰底画布后，中间过程卡不能再用面板同色，否则只剩一圈框、几乎看不出层次 */
 .trace-item {
   border: 1px solid var(--sf-border-subtle);
   border-radius: 6px;
-  background: var(--sf-surface);
+  background: var(--sf-surface-subtle);
   overflow: hidden;
 }
 .trace-head {
@@ -994,7 +1099,8 @@ body {
   margin: 0;
   padding: 7px 9px;
   border-radius: 6px;
-  background: var(--sf-surface-subtle);
+  /* 卡片本体已经是 subtle，详情再用同色就分不出「这是嵌在里面的一段」，落到更深的 inset */
+  background: var(--sf-surface-inset);
   font-size: 11.5px;
   line-height: 1.6;
   /* 单段结果可能有几百行，给它自己的滚动区，别把整条消息撑成一屏 */
@@ -1071,29 +1177,8 @@ body {
     transform: none;
   }
 }
-@media (max-width: 64em) {
-  .profile-head-grid {
-    grid-template-columns: 130px minmax(0, 1fr);
-  }
-  .mcp-card {
-    grid-template-columns: minmax(0, 1fr);
-    min-height: 0;
-  }
-  .mcp-conn {
-    border-right: none;
-    border-bottom: 1px solid var(--sf-border-subtle);
-  }
-  /* 单列布局下没有「左栏高度」可对齐，工具列表直接展开、随页面滚动，
-     既不内部滚动，也就不需要渐隐提示 */
-  .mcp-tools-scroll {
-    flex: none;
-    height: auto;
-    overflow-y: visible;
-  }
-  .mcp-tools-fade {
-    display: none;
-  }
-}
+/* 注：配置页 / MCP 页 / 设置页的多栏降级都改由容器查询负责（见各自定义处），
+   这里只留下真正与「设备视口」有关的规则：触屏命中区、顶栏、全屏 Agent 面板等。 */
 @media (max-width: 48em) {
   .mantine-ActionIcon-root {
     min-width: 44px;
@@ -1108,21 +1193,8 @@ body {
   .chat-composer textarea {
     min-height: 44px;
   }
-  .form-grid-2,
-  .proxy-group-main,
-  .profiles-card {
-    grid-template-columns: minmax(0, 1fr);
-  }
-  /* 窄屏：输出格式与分享链接各占整行 */
-  .profile-head-grid {
-    grid-template-columns: minmax(0, 1fr);
-  }
   .profile-title-input .mantine-Input-input {
     font-size: 19px;
-  }
-  .profiles-list {
-    border-right: none;
-    border-bottom: 1px solid var(--sf-border-subtle);
   }
   .topbar {
     overflow-x: auto;
@@ -1175,24 +1247,12 @@ body {
   .agent-zoom {
     display: none;
   }
-  .section-tabs {
-    overflow-x: auto;
-  }
-  /* 移动端横向滑动区不显示滚动条 */
-  .topbar,
-  .section-tabs {
+  /* 移动端横向滑动区不显示滚动条（.section-tabs 的同款处理见其定义处） */
+  .topbar {
     scrollbar-width: none;
   }
-  .topbar::-webkit-scrollbar,
-  .section-tabs::-webkit-scrollbar {
+  .topbar::-webkit-scrollbar {
     display: none;
-  }
-  .proxy-group-checkbox,
-  .proxy-group-delete {
-    margin-bottom: 0;
-  }
-  .proxy-group-delete {
-    justify-self: end;
   }
 }
 /* 窄机型（≤ 416px）：四个 tab 加上主题/Agent 按钮已经放不下，
@@ -1301,6 +1361,8 @@ body {
 .md {
   font-size: 13.5px;
   line-height: 1.6;
+  min-width: 0;
+  overflow-wrap: break-word;
 }
 .md > :first-child {
   margin-top: 0;
@@ -1326,13 +1388,21 @@ body {
   padding: 1px 5px;
   border-radius: 5px;
 }
+/* 代码块与下面的表格是面板里最容易「顶宽」的两种块：都必须是自己的横向滚动容器，
+   并显式 max-width:100%，否则它们的 max-content 会一路传导上去把整条消息撑宽。 */
 .md pre {
   background: var(--mantine-color-dark-8);
   color: #e6e6ef;
   padding: 11px 13px;
   border-radius: 9px;
+  max-width: 100%;
   overflow-x: auto;
   margin: 0.6em 0;
+}
+.md pre code {
+  /* 代码不折行，交给上面的横向滚动；折行会让缩进结构彻底看不出来 */
+  white-space: pre;
+  overflow-wrap: normal;
 }
 .md pre code {
   background: none;
@@ -1358,6 +1428,7 @@ body {
   margin: 0.6em 0;
   font-size: 12.5px;
   display: block;
+  max-width: 100%;
   overflow-x: auto;
 }
 .md th,

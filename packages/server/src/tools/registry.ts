@@ -12,7 +12,42 @@ import {
 } from '../service.js'
 import { getRenderer, listRenderers, parseSubscription } from '@subforge/core'
 import type { NodeChecker } from '../health.js'
-import { newId, newToken, now } from '../util.js'
+import { contentRev, newId, newToken, now } from '../util.js'
+
+/**
+ * 「整份替换」类写操作的统一前置条件：**没读过当前内容就不准覆盖**。
+ *
+ * 这类工具要求调用方把它没有创作过的既有内容原样交回来（整个脚本、整个规则数组、整份订阅原文）。
+ * 模型凭记忆重建时最常见的事故不是写错，而是漏抄——用户与本次需求无关的规则 / 分组 / 节点静默消失。
+ *
+ * 靠「缩水多少算异常」的阈值去猜是猜不准的（既误伤有意的精简，也放过只漏抄三成的情况）。
+ * 改成读工具发指纹、写工具验指纹：拿不出指纹 = 没读过，指纹对不上 = 读完之后内容又变了。
+ * 两种情况都拒绝，让调用方先去读最新内容、在最新版本上重做本次修改。
+ *
+ * @param what 人话描述这次写的是什么（用于错误信息）
+ * @param readHint 该去调哪个读工具、取哪个字段
+ */
+function assertFresh(what: string, rev: string, baseRev: string | undefined, readHint: string): void {
+  if (baseRev === rev) return
+  if (!baseRev) {
+    throw new Error(
+      `${what}已有内容，整份覆盖前必须先读过它：${readHint}，把拿到的指纹作为 baseRev 传回来。` +
+        `没有这一步就覆盖，等于拿一份凭记忆重建的副本盖掉用户的现有内容。`,
+    )
+  }
+  throw new Error(
+    `baseRev 不匹配：${what}在你读取之后已经变了（可能是用户在界面上改的，也可能是你自己上一步刚写过、或刚回滚过）。` +
+      `当前指纹是 ${rev}，你带来的是 ${baseRev}。请${readHint}重新读取最新内容，在最新版本上重做本次修改——` +
+      `直接覆盖会把中间那次改动吃掉。`,
+  )
+}
+
+/** 配置里「会被 write_config 整份替换」的部分，指纹按它算 */
+function configFingerprint(p: Profile): string {
+  return contentRev(
+    JSON.stringify({ groups: p.profile.groups, rules: p.profile.rules, ruleProviders: p.profile.ruleProviders ?? [] }),
+  )
+}
 
 /** 框架无关的工具定义。MCP server 与内嵌 agent 都是它的薄适配层。 */
 export interface Tool<I extends ZodTypeAny = ZodTypeAny> {
@@ -70,18 +105,54 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
       },
     },
     {
+      name: 'get_subscription',
+      description:
+        '读取一个订阅源。默认只回元信息与节点样本；要改写 content 时才传 includeContent=true 取回原文。\n' +
+        '只有取回了原文才会一并给出 contentRev——update_subscription 覆盖 content 时要把它当 baseRev 传回来，' +
+        '这样「没读过就不准覆盖」是自动成立的。注意订阅原文可能很大，非必要不要取。',
+      schema: z.object({ subscriptionId: z.string(), includeContent: z.boolean().optional() }),
+      async handler({ subscriptionId, includeContent }, { storage }) {
+        const s = await storage.getSubscription(subscriptionId)
+        if (!s) throw new Error('订阅不存在')
+        const nodes = s.content ? parseSubscription(s.content) : []
+        return {
+          id: s.id,
+          name: s.name,
+          url: s.url,
+          fetchedAt: s.fetchedAt,
+          userInfo: s.userInfo,
+          nodeCount: nodes.length,
+          sample: nodes.slice(0, 10).map((n) => n.name),
+          ...(includeContent ? { content: s.content ?? '', contentRev: contentRev(s.content ?? '') } : {}),
+        }
+      },
+    },
+    {
       name: 'update_subscription',
       description:
-        '更新订阅源的元信息（名称 / url / 手工 content）。仅更新所提供的字段；改 url 不会自动抓取，需要时再调 refresh_subscription。',
+        '更新订阅源的元信息（名称 / url / 手工 content）。仅更新所提供的字段；改 url 不会自动抓取，需要时再调 refresh_subscription。\n' +
+        '⚠️ content 是用户粘贴的节点原文，整份替换，而且**订阅没有版本历史、覆盖后无法回滚**。' +
+        '所以覆盖已有 content 必须带 baseRev（get_subscription 传 includeContent=true 返回的 contentRev）：' +
+        '没把原文读回来过就不允许覆盖。要加节点就在读回来的原文后面追加，不要凭记忆重写整份。',
       schema: z.object({
         subscriptionId: z.string(),
         name: z.string().optional(),
         url: z.string().optional(),
         content: z.string().optional(),
+        baseRev: z.string().optional().describe('get_subscription(includeContent=true) 返回的 contentRev；覆盖已有 content 时必填'),
       }),
-      async handler({ subscriptionId, name, url, content }, { storage }) {
+      async handler({ subscriptionId, name, url, content, baseRev }, { storage }) {
         const cur = await storage.getSubscription(subscriptionId)
         if (!cur) throw new Error('订阅不存在')
+        // 订阅内容没有快照可回滚，是全仓最不能覆盖错的东西
+        if (content !== undefined && cur.content) {
+          assertFresh(
+            '该订阅的节点原文',
+            contentRev(cur.content),
+            baseRev,
+            '调 get_subscription 并传 includeContent=true 取 contentRev',
+          )
+        }
         const next: Subscription = {
           ...cur,
           ...(name !== undefined ? { name } : {}),
@@ -153,12 +224,23 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
     },
     {
       name: 'get_profile',
-      description: '读取一个配置的完整内容：转换脚本、代理组、规则、规则集。',
+      description:
+        '读取一个配置的完整内容：转换脚本、代理组、规则、规则集。\n' +
+        '同时返回 scriptRev / configRev 两个内容指纹——write_script / write_config 要把它当 baseRev 传回来，' +
+        '这是「读过才准整份覆盖」的凭据。改动前先调本工具。',
       schema: z.object({ profileId: z.string() }),
       async handler({ profileId }, { storage }) {
         const p = await storage.getProfile(profileId)
         if (!p) throw new Error('配置不存在')
-        return { id: p.id, name: p.name, target: p.target, script: p.script ?? '', profile: p.profile }
+        return {
+          id: p.id,
+          name: p.name,
+          target: p.target,
+          script: p.script ?? '',
+          profile: p.profile,
+          scriptRev: contentRev(p.script ?? ''),
+          configRev: configFingerprint(p),
+        }
       },
     },
     {
@@ -190,13 +272,22 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
           updatedAt: now(),
         }
         await storage.upsertProfile(p)
-        return { ok: true, id: p.id, name: p.name, token: p.token, target: p.target }
+        // 一并返回指纹，紧接着 write_config / write_script 就不必再多跑一趟 get_profile
+        return {
+          ok: true,
+          id: p.id,
+          name: p.name,
+          token: p.token,
+          target: p.target,
+          scriptRev: contentRev(p.script ?? ''),
+          configRev: configFingerprint(p),
+        }
       },
     },
     {
       name: 'update_profile',
       description:
-        '更新配置的元信息：名称 / 目标格式(target) / 关联订阅(subscriptionIds)。会自动版本快照，可回滚。组、规则、脚本请分别用 write_config / write_script。',
+        '更新配置的元信息：名称 / 目标格式(target) / 关联订阅(subscriptionIds)。会自动版本快照，可回滚。组与规则用 write_config，脚本用 patch_script（改动）或 write_script（首次写入）。',
       schema: z.object({
         profileId: z.string(),
         name: z.string().optional(),
@@ -291,30 +382,102 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
       },
     },
     {
-      name: 'write_script',
-      description: '保存某配置的转换脚本（自动创建版本快照，可回滚）。建议先用 run_preview 验证。',
-      schema: z.object({ profileId: z.string(), script: z.string(), note: z.string().optional() }),
-      async handler({ profileId, script, note }, { storage }) {
+      name: 'patch_script',
+      description:
+        '对某配置的转换脚本做局部替换：只改指定片段，脚本其余部分逐字保留。\n' +
+        '【改动已有脚本一律用本工具】——用 write_script 整份重写等于凭记忆默写一遍上百行脚本，' +
+        '极易漏掉与本次需求无关的规则 / 分组，用户的配置会被静默改坏。\n' +
+        '每个 edit 的 oldText 必须在当前脚本中【恰好出现一次】，所以要带足上下文（多带几行）保证唯一。' +
+        '任何一条匹配不上或匹配到多处，整批都不写入、脚本保持原样。先用 get_profile 拿到脚本原文再照抄片段。\n' +
+        '不需要 baseRev：oldText 本身就是凭据——匹配得上说明你手里的片段确实是脚本的现状，' +
+        '而且别处的改动不会被本次覆盖掉。',
+      schema: z.object({
+        profileId: z.string(),
+        edits: z
+          .array(
+            z.object({
+              oldText: z.string().min(1).describe('要被替换的原文片段，必须与脚本逐字一致且全局唯一'),
+              newText: z.string().describe('替换成的新内容；留空字符串表示删除这段'),
+            }),
+          )
+          .min(1),
+        note: z.string().optional(),
+      }),
+      async handler({ profileId, edits, note }, { storage }) {
         const p = await storage.getProfile(profileId)
         if (!p) throw new Error('配置不存在')
+        if (!p.script) throw new Error('该配置还没有脚本，首次写入请用 write_script')
+
+        // 先在内存里把整批 edit 跑完，全部成功才落库：半套改动比不改更糟
+        let next = p.script
+        ;(edits as Array<{ oldText: string; newText: string }>).forEach(({ oldText, newText }, i) => {
+          const at = `第 ${i + 1} 条 edit`
+          if (oldText === newText) throw new Error(`${at} 的 oldText 与 newText 相同，没有实际改动`)
+          const hits = next.split(oldText).length - 1
+          if (hits === 0) {
+            throw new Error(
+              `${at} 的 oldText 在脚本中找不到（注意缩进、空行与全角/半角要逐字一致）。` +
+                `若是照着旧版本改的，请先用 get_profile 重新读取脚本原文。`,
+            )
+          }
+          if (hits > 1) {
+            throw new Error(`${at} 的 oldText 在脚本中出现了 ${hits} 次，无法确定改哪一处。请多带几行上下文让它唯一。`)
+          }
+          next = next.replace(oldText, () => newText)
+        })
+
+        await saveProfileWithVersion(storage, { ...p, script: next }, note ?? 'agent 局部修改脚本')
+        return {
+          ok: true,
+          edits: edits.length,
+          bytesBefore: p.script.length,
+          bytesAfter: next.length,
+          scriptRev: contentRev(next),
+        }
+      },
+    },
+    {
+      name: 'write_script',
+      description:
+        '整份替换某配置的转换脚本（自动创建版本快照，可回滚）。建议先用 run_preview 验证。\n' +
+        '仅用于「首次写入」或「用户明确要求整份重写」；在已有脚本上改动请用 patch_script。\n' +
+        '脚本已存在时必须带 baseRev（get_profile 返回的 scriptRev）：没读过当前脚本就不允许覆盖它。' +
+        '首次写入（当前无脚本）不需要 baseRev。',
+      schema: z.object({
+        profileId: z.string(),
+        script: z.string(),
+        baseRev: z.string().optional().describe('get_profile 返回的 scriptRev；覆盖已有脚本时必填'),
+        note: z.string().optional(),
+      }),
+      async handler({ profileId, script, baseRev, note }, { storage }) {
+        const p = await storage.getProfile(profileId)
+        if (!p) throw new Error('配置不存在')
+        const prev = p.script ?? ''
+        // 空脚本 = 还没有东西可丢，等同「新建文件」，不要求先读
+        if (prev) assertFresh('该配置的转换脚本', contentRev(prev), baseRev, '调 get_profile 取 scriptRev')
         await saveProfileWithVersion(storage, { ...p, script }, note ?? 'agent 修改脚本')
-        return { ok: true }
+        return { ok: true, bytesBefore: prev.length, bytesAfter: script.length, scriptRev: contentRev(script) }
       },
     },
     {
       name: 'write_config',
       description:
-        '更新某配置的代理组 / 规则 / 规则集（整体替换所提供的字段，自动版本快照）。用于让 agent 增删组或规则。',
+        '更新某配置的代理组 / 规则 / 规则集。未提供的字段保持不变，但**提供的字段是整个数组替换**：\n' +
+        '要加一条规则，必须把现有规则连同新规则一起完整传回来，只传新增的那条会把其余规则全删掉。\n' +
+        '必须带 baseRev（get_profile 返回的 configRev）：没读过当前的组 / 规则就不允许覆盖它们。' +
+        '所以流程固定是 get_profile → 在拿到的数组上增删 → 带着 configRev 调本工具。',
       schema: z.object({
         profileId: z.string(),
         groups: z.array(z.any()).optional(),
         rules: z.array(z.string()).optional(),
         ruleProviders: z.array(z.any()).optional(),
+        baseRev: z.string().optional().describe('get_profile 返回的 configRev；必填'),
         note: z.string().optional(),
       }),
-      async handler({ profileId, groups, rules, ruleProviders, note }, { storage }) {
+      async handler({ profileId, groups, rules, ruleProviders, baseRev, note }, { storage }) {
         const p = await storage.getProfile(profileId)
         if (!p) throw new Error('配置不存在')
+        assertFresh('该配置的组 / 规则', configFingerprint(p), baseRev, '调 get_profile 取 configRev')
         const nextProfile = {
           ...p.profile,
           ...(groups ? { groups } : {}),
@@ -389,7 +552,9 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
     {
       name: 'save_template',
       description:
-        '把某个配置的当前内容（节点处理/组/规则/脚本）保存为一个可复用模板。传 id 可覆盖同名模板。',
+        '把某个配置的当前内容（节点处理/组/规则/脚本）保存为一个可复用模板。不传 id 即新建。\n' +
+        '⚠️ 传 id 是**整份覆盖该 id 的模板**（不是按名字匹配），而模板没有版本历史、覆盖后无法恢复——' +
+        '要存成一份新模板就别传 id；确实要更新某个模板时，先 list_templates 核对 id 再传。',
       schema: z.object({ profileId: z.string(), name: z.string(), description: z.string().optional(), id: z.string().optional() }),
       async handler({ profileId, name, description, id }, { storage }) {
         const p = await storage.getProfile(profileId)
@@ -426,13 +591,50 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
       },
     },
     {
+      name: 'get_working_memory',
+      description:
+        '读取跨会话「长期记忆」的当前全文与指纹 rev。整理 / 改写记忆（update_working_memory 的 replace 模式）前必须先调它；' +
+        '只是新增一条偏好的话不用——直接用默认的 append 模式即可。',
+      schema: z.object({}),
+      async handler(_i, { storage }) {
+        const text = (await storage.getWorkingMemory()).trim()
+        return { text, rev: contentRev(text) }
+      },
+    },
+    {
       name: 'update_working_memory',
       description:
-        '更新跨会话「长期记忆」：记录用户长期偏好与项目事实（如命名习惯、常用分组方式、偏好的规则）。会在后续对话中作为上下文提供。',
-      schema: z.object({ text: z.string() }),
-      async handler({ text }, { storage }) {
-        await storage.setWorkingMemory(text)
-        return { ok: true }
+        '更新跨会话「长期记忆」：记录用户长期偏好与项目事实（如命名习惯、常用分组方式、偏好的规则）。会在后续对话中作为上下文提供。\n' +
+        '新增一条偏好请用 mode="append"（默认）：接在现有内容后面，不需要知道原有内容，也就不可能覆盖掉它。\n' +
+        'mode="replace" 是整份覆盖，必须带 baseRev（get_working_memory 返回的 rev）——没读过就不准覆盖，' +
+        '否则凭记忆重写会把以前记下的偏好一并抹掉。\n' +
+        '返回值里带上了合并后的全文与新 rev。',
+      schema: z.object({
+        text: z.string().min(1),
+        mode: z.enum(['append', 'replace']).optional().describe('默认 append：追加一条；replace 才是整份覆盖'),
+        baseRev: z.string().optional().describe('get_working_memory 返回的 rev；mode="replace" 时必填'),
+      }),
+      async handler({ text, mode, baseRev }, { storage }) {
+        const prev = (await storage.getWorkingMemory()).trim()
+        const addition = text.trim()
+        let next: string
+        if (mode === 'replace') {
+          // 记忆本来就是空的时候没有东西可丢，不必先读
+          if (prev) assertFresh('长期记忆', contentRev(prev), baseRev, '调 get_working_memory 取 rev')
+          next = addition
+        } else {
+          // 已经记过的原样跳过，避免同一条偏好被反复追加成一大串重复
+          next = !prev ? addition : prev.includes(addition) ? prev : `${prev}\n${addition}`
+        }
+        await storage.setWorkingMemory(next)
+        return {
+          ok: true,
+          mode: mode ?? 'append',
+          bytesBefore: prev.length,
+          bytesAfter: next.length,
+          text: next,
+          rev: contentRev(next),
+        }
       },
     },
   ]

@@ -474,9 +474,13 @@ export function AgentChatPanel({
             {it.role === 'assistant' && (
               <Trace reasoning={it.reasoning} steps={it.steps} tools={it.tools} busy={false} />
             )}
-            <div className={`msg ${it.role}`}>
-              {it.role === 'assistant' ? <Markdown text={it.content} /> : it.content}
-            </div>
+            {/* 内容为空就不画气泡：历史里可能存着只有工具调用、没有正文的一轮，
+                渲染出来就是一个莫名其妙的空框 */}
+            {it.content ? (
+              <div className={`msg ${it.role}`}>
+                {it.role === 'assistant' ? <Markdown text={it.content} /> : it.content}
+              </div>
+            ) : null}
           </div>
         ))}
         {live && (

@@ -78,6 +78,20 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 
 ⚠️ `providerTools` 有前提：**只有模型经 OpenRouter 转发时才生效**。换成直连 OpenAI 或本地 Ollama，`openrouter:*` 声明会被上游忽略；`registryTools` 是我们自己执行的，与模型供应商无关。设置页对此有提示。
 
+### Agent 上下文装配
+
+`agent/context.ts` 是纯函数层（不 import 任何 SDK 类型），`agent/memory.ts` 负责取数与落库，`agent/aiSdk.ts::toModelMessages` 才转成 AI SDK 的消息格式。换框架时只需重写最后这一步。
+
+三条规则：
+
+1. **工具调用要还原回去。** 历史里的 `trace.steps` 会被展开成 `assistant(tool-call)` + `tool(tool-result)` 消息对。只喂正文的话，模型对上一轮读到过什么完全失忆，read-before-write 拿到的指纹更是一轮就没。缺 id 的老步骤按 `hist-<msgId>-<i>` 补一个确定性 id，否则调用与结果配不上。
+2. **按 token 预算从新往旧回溯，只在轮次边界切。** 切在 tool 调用与它的结果之间 provider 直接报错；切在 user 与它的回答之间模型会看到没有出处的答复。最近 `fullResultTurns` 轮保留完整结果，更早的降级成 `OMITTED_RESULT` 占位（工具名与参数保留，结果换成「需要就重新调」）。最新一轮永远保留，单轮超预算就把结果压更狠，不交出空历史。
+3. **压缩产物是一条 `role='system'` 的消息**，`createdAt` 设为最后一条被压缩消息 +1。加载时取最后一条 system 消息作分界，它之前的不再送进模型，正文作为摘要接续（等价于 pi 的 `firstKeptEntryId`）。**不动表结构、不删任何数据**——人类回看会话时历史完整，压缩只影响送给模型的那份。前端本就只渲染 user/assistant，天然看不到它。
+
+压缩走 `agent/summarize.ts`（无工具的单次请求，复用同一套模型配置）。**失败/超时一律返回 `undefined` 而非抛错**：不落库就等于没发生，下一轮拿着更长的一段重试，用户这一轮照常进行。
+
+预算常量在 `context.ts::DEFAULT_BUDGET`，刻意不进设置页——OpenAI 兼容端点拿不到 `contextWindow`，多一个用户看不懂又调不对的旋钮没有意义。
+
 ### 引导配置 vs 运行时设置
 
 两套配置泾渭分明，别混：
