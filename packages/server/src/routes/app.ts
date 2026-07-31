@@ -384,7 +384,7 @@ export function createApp(deps: AppDeps): Hono {
     if (!p) return c.json({ error: '不存在' }, 404)
     try {
       const out = await buildProfileOutput(storage, runner, p)
-      return c.json({ ok: true, config: out.config, stats: out.stats, logs: out.logs })
+      return c.json({ ok: true, config: out.config, stats: out.stats, logs: out.logs, warnings: out.warnings })
     } catch (e) {
       return c.json({ ok: false, error: e instanceof Error ? e.message : String(e) }, 500)
     }

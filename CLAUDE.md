@@ -106,6 +106,25 @@ MCP server（同一套工具，供外部 agent 驱动）：`node packages/server
 
 边缘（QuickJS）只支持同步脚本。
 
+### 协议解析与支持矩阵
+
+解析器覆盖对齐 Sub-Store 的 URI 解析器：`vmess / vless / trojan / ss / ssr / hysteria / hysteria2 / tuic / socks5 / http / snell / anytls`。
+
+- 单协议解析在 `parsers/protocols.ts`，`parsers/index.ts` 只做 scheme 分发和「把粘贴的一坨文本切成一个个 URI」。
+- **解析器一律「认不出就返回 null」**，绝不抛错——一个畸形节点不能带走整份订阅。
+- 不用 `new URL()` 解析节点 URI：userinfo 里常有未转义的 `:` `/`，名称里常有未转义的中文、空格和 `#`，WHATWG URL 会抛错或截错字段。统一走 `util.ts::parseUriParts`。
+- `http://` / `https://` 和订阅链接同形，`parseHttpProxy` 因此要求**显式端口且无路径**，否则用户粘的订阅地址会变成一个假节点。
+
+**加协议要同时改三处**，漏一处就会静默丢节点或写出非法配置：
+
+1. `model.ts` 的 `ProxyType`（以及协议特有字段）
+2. `parsers/protocols.ts` 加解析器 + `parsers/index.ts` 的 `SCHEMES` 与 dispatch；`parsers/clash.ts` 的 `SUPPORTED`（Clash YAML 侧）
+3. `renderers/support.ts` 的支持矩阵 + 对应渲染器的 `switch`
+
+`SCHEMES` **顺序敏感**：长 scheme 必须排在它的前缀之前（`ssr` 先于 `ss`、`hysteria2` 先于 `hysteria`、`https` 先于 `http`），否则切分会把 `ssr://` 认成 `ss://`。
+
+渲染前必须过 `filterSupported(nodes, target, warnings)`：解析器认得的协议比任何单一客户端都多，不受支持的节点既会写出非法配置，又会以「幽灵成员」留在 proxy-groups 里让客户端整份加载失败。被跳过的部分汇总成 `PipelineOutput.warnings`，经 `/api/profiles/:id/output` 回到前端预览面板。
+
 ### 存储契约
 
 `storage/types.ts::Storage` 全异步。三个实现必须行为一致，由 `storage/storage-contract.test.ts` 用同一组用例覆盖（其中 D1 用 better-sqlite3 伪造）。
