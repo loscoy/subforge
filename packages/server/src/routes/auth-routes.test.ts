@@ -4,12 +4,13 @@ import { NodeVmRunner } from '../sandbox/nodeVm.js'
 import { InMemoryStorage } from '../storage/index.js'
 import { createApp } from './app.js'
 
-const mk = (over: Partial<ReturnType<typeof getConfig>> = {}) => {
+const mk = (over: Partial<ReturnType<typeof getConfig>> = {}, clientIp = '127.0.0.1') => {
   const storage = new InMemoryStorage()
   const app = createApp({
     storage,
     runner: new NodeVmRunner(),
-    config: { ...getConfig(), adminToken: undefined, allowNoAuth: false, ...over },
+    config: { ...getConfig(), allowNoAuth: false, ...over },
+    getClientIp: () => clientIp,
   })
   return { app, storage }
 }
@@ -57,23 +58,29 @@ describe('账号初始化（setup）', () => {
     expect((await app.fetch(post('/api/auth/setup', { username: 'a', password: 'short' }))).status).toBe(400)
   })
 
-  it('升级保护：环境仍有 ADMIN_TOKEN 时，setup 必须携带正确旧口令', async () => {
-    const { app } = mk({ adminToken: 'legacy-secret' })
-    const st = await json(await app.fetch(new Request('http://x/api/auth/status')))
-    expect(st.legacyTokenRequired).toBe(true)
-    const no = await app.fetch(post('/api/auth/setup', { username: 'admin', password: 'p@ssw0rd!' }))
-    expect(no.status).toBe(401)
-    const wrong = await app.fetch(
-      post('/api/auth/setup', { username: 'admin', password: 'p@ssw0rd!', legacyToken: 'nope' }),
-    )
-    expect(wrong.status).toBe(401)
-    const ok = await app.fetch(
-      post('/api/auth/setup', { username: 'admin', password: 'p@ssw0rd!', legacyToken: 'legacy-secret' }),
-    )
-    expect(ok.status).toBe(201)
-    // 建号后 ADMIN_TOKEN 不再参与 API 鉴权
-    const meta = await app.fetch(new Request('http://x/api/meta', { headers: { 'X-Admin-Token': 'legacy-secret' } }))
-    expect(meta.status).toBe(401)
+  it('远程首次初始化按 TOFU 放行', async () => {
+    const remote = mk({}, '203.0.113.10')
+    const status = await json(await remote.app.fetch(new Request('http://x/api/auth/status')))
+    expect(status.initialized).toBe(false)
+    const setup = await remote.app.fetch(post('/api/auth/setup', { username: 'admin', password: 'p@ssw0rd!' }))
+    expect(setup.status).toBe(201)
+    expect(await remote.storage.getAuth()).toContain('"username":"admin"')
+  })
+
+  it('并发 setup 只有一个条件写成功', async () => {
+    const storage = new InMemoryStorage()
+    const make = () =>
+      createApp({
+        storage,
+        runner: new NodeVmRunner(),
+        config: { ...getConfig(), allowNoAuth: false },
+        getClientIp: () => '127.0.0.1',
+      })
+    const [a, b] = await Promise.all([
+      make().fetch(post('/api/auth/setup', { username: 'admin-a', password: 'p@ssw0rd!' })),
+      make().fetch(post('/api/auth/setup', { username: 'admin-b', password: 'p@ssw0rd!' })),
+    ])
+    expect([a.status, b.status].sort()).toEqual([201, 409])
   })
 })
 
@@ -127,6 +134,29 @@ describe('登录与会话', () => {
     const { app } = await setupApp()
     const res = await app.fetch(new Request('http://x/api/meta', { headers: { 'X-Admin-Token': 'whatever' } }))
     expect(res.status).toBe(401)
+  })
+
+  it('失败计数跨 app 实例生效，并按客户端 IP 隔离', async () => {
+    const storage = new InMemoryStorage()
+    const config = { ...getConfig(), allowNoAuth: false }
+    const make = (ip: string) =>
+      createApp({ storage, runner: new NodeVmRunner(), config, getClientIp: () => ip })
+    const a = make('198.51.100.20')
+    const b = make('198.51.100.20')
+    const local = make('127.0.0.1')
+    await local.fetch(post('/api/auth/setup', { username: 'admin', password: 'p@ssw0rd!' }))
+
+    for (let i = 0; i < 4; i += 1) {
+      const res = await (i % 2 ? a : b).fetch(post('/api/auth/login', { username: 'admin', password: 'wrong-pass' }))
+      expect(res.status).toBe(401)
+    }
+    const locked = await a.fetch(post('/api/auth/login', { username: 'admin', password: 'wrong-pass' }))
+    expect(locked.status).toBe(429)
+    expect(locked.headers.get('retry-after')).toBe('30')
+    expect((await b.fetch(post('/api/auth/login', { username: 'admin', password: 'p@ssw0rd!' }))).status).toBe(429)
+
+    const otherIp = make('198.51.100.21')
+    expect((await otherIp.fetch(post('/api/auth/login', { username: 'admin', password: 'p@ssw0rd!' }))).status).toBe(200)
   })
 })
 

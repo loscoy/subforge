@@ -3,24 +3,20 @@ import { useState, type ReactNode } from 'react'
 import { apiErrorText, authApi } from '../api'
 
 /**
- * 登录 / 首次初始化的全屏门。mode 由 /api/auth/status 决定：
- * 未初始化 → setup（legacyTokenRequired 时多一个旧口令输入框），未登录 → login。
+ * 登录 / 首次初始化的全屏门。mode 由 /api/auth/status 决定。
  */
 export function AuthGate({
   mode,
-  legacyTokenRequired,
   brand,
   onDone,
 }: {
   mode: 'setup' | 'login'
-  legacyTokenRequired?: boolean
   brand: ReactNode
   onDone: () => void
 }) {
   const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
-  const [legacyToken, setLegacyToken] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
 
@@ -33,7 +29,7 @@ export function AuthGate({
     setBusy(true)
     try {
       if (mode === 'setup') {
-        await authApi.setup({ username, password, ...(legacyTokenRequired ? { legacyToken } : {}) })
+        await authApi.setup({ username, password })
       } else {
         await authApi.login({ username, password })
       }
@@ -79,16 +75,6 @@ export function AuthGate({
             mt="sm"
             value={confirm}
             onChange={(e) => setConfirm(e.currentTarget.value)}
-            onKeyDown={onEnter}
-          />
-        )}
-        {mode === 'setup' && legacyTokenRequired && (
-          <PasswordInput
-            label="旧管理口令（ADMIN_TOKEN）"
-            description="此实例环境仍设有 ADMIN_TOKEN，需验证后才能初始化账号。"
-            mt="sm"
-            value={legacyToken}
-            onChange={(e) => setLegacyToken(e.currentTarget.value)}
             onKeyDown={onEnter}
           />
         )}

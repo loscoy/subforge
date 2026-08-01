@@ -1,4 +1,5 @@
 import type { ProxyNode } from '../model.js'
+import { compileLinearRegex } from '../safeRegex.js'
 
 /** 常见地区关键词 → 区域码 + emoji。用于从节点名猜测地区。 */
 const REGION_TABLE: Array<{ re: RegExp; code: string; emoji: string }> = [
@@ -49,14 +50,48 @@ export function dedupe(nodes: ProxyNode[]): ProxyNode[] {
 
 /** 正则过滤（保留匹配 name 的节点）。 */
 export function keep(nodes: ProxyNode[], pattern: string | RegExp): ProxyNode[] {
-  const re = typeof pattern === 'string' ? new RegExp(pattern) : pattern
+  const re = typeof pattern === 'string' ? compileLinearRegex(pattern) : pattern
   return nodes.filter((n) => re.test(n.name))
 }
 
 /** 正则过滤（剔除匹配 name 的节点）。 */
 export function drop(nodes: ProxyNode[], pattern: string | RegExp): ProxyNode[] {
-  const re = typeof pattern === 'string' ? new RegExp(pattern) : pattern
+  const re = typeof pattern === 'string' ? compileLinearRegex(pattern) : pattern
   return nodes.filter((n) => !re.test(n.name))
+}
+
+/** 节点名长度上限：远超正常取名需求，纯粹为挡住畸形输入撑爆输出。 */
+const MAX_NODE_NAME_LENGTH = 256
+
+/**
+ * 清洗单个节点名里「任何目标格式下都不该出现」的字符。
+ *
+ * 节点名来自订阅原文（不可信）：URI 片段会经 `decodeURIComponent` 解码，
+ * `%0A` 会变成真正的换行；Clash YAML 的 name 也可以是多行标量。而部分渲染器
+ * （如 Surge 的 INI 风格）是按行拼接的，换行会被当成新的配置行 → 配置注入。
+ *
+ * 这里只剥掉换行与 C0/C1 控制字符——它们在任何格式里都不是合法名称内容；
+ * 格式专属的分隔符（如 Surge 的 `,` `=`）由各渲染器自行处理，避免在这里
+ * 改动 mihomo / sing-box 下本来合法的名字。
+ */
+export function sanitizeNodeName(name: string): string {
+  const cleaned = Array.from(name)
+    .filter((ch) => {
+      const code = ch.codePointAt(0)!
+      return !(code <= 0x1f || (code >= 0x7f && code <= 0x9f))
+    })
+    .join('')
+    .trim()
+  const bounded = cleaned.length > MAX_NODE_NAME_LENGTH ? cleaned.slice(0, MAX_NODE_NAME_LENGTH).trim() : cleaned
+  return bounded || '未命名节点'
+}
+
+/** 批量清洗节点名。渲染前统一走一遍，让所有渲染器共享同一份保证。 */
+export function sanitizeNodeNames(nodes: ProxyNode[]): ProxyNode[] {
+  return nodes.map((n) => {
+    const name = sanitizeNodeName(n.name)
+    return name === n.name ? n : { ...n, name }
+  })
 }
 
 /** 名称去重后缀：同名节点自动追加 " 2" " 3" …，保证配置内唯一。 */

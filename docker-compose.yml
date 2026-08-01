@@ -9,8 +9,6 @@ services:
     volumes:
       - ./data:/app/data
     environment:
-      # 管理口令（留空时管理接口默认锁定）
-      ADMIN_TOKEN: ${ADMIN_TOKEN:-}
       # 数据库里密钥字段的加密主密钥（留空则 Agent 与远端 MCP 保持关闭）
       SETTINGS_KEY: ${SETTINGS_KEY:-}
       # 模型 / 联网工具 / 远端 MCP 口令都在 Web「设置」页里配，不再走环境变量

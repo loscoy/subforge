@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { D1Storage } from './d1.js'
 import { InMemoryStorage } from './memory.js'
+import { SqliteStorage } from './sqlite.js'
 import type { Storage } from './types.js'
 
 /**
@@ -12,7 +13,14 @@ import type { Storage } from './types.js'
  */
 function makeFakeD1(): any {
   const db = new Database(':memory:')
-  for (const f of ['0001_init.sql', '0002_templates.sql', '0003_message_tools.sql', '0004_message_trace.sql', '0005_sessions.sql']) {
+  for (const f of [
+    '0001_init.sql',
+    '0002_templates.sql',
+    '0003_message_tools.sql',
+    '0004_message_trace.sql',
+    '0005_sessions.sql',
+    '0006_login_throttles.sql',
+  ]) {
     db.exec(readFileSync(fileURLToPath(new URL(`../../migrations/${f}`, import.meta.url)), 'utf-8'))
   }
   return {
@@ -33,8 +41,8 @@ function makeFakeD1(): any {
           return r ?? null
         },
         async run() {
-          stmt.run(...args)
-          return { success: true }
+          const result = stmt.run(...args)
+          return { success: true, meta: { changes: result.changes } }
         },
       }
       return api
@@ -181,8 +189,42 @@ function runContract(name: string, make: () => Storage) {
       await s.setSettings('{}')
       expect(await s.getAuth()).toBe('{"sessions":[{"tokenHash":"x"}]}')
     })
+
+    it('auth 首建是条件写，不能覆盖已有账号', async () => {
+      const s = make()
+      const first = '{"account":{"username":"a"},"sessions":[]}'
+      const second = '{"account":{"username":"b"},"sessions":[]}'
+      expect(await s.createAuthIfUninitialized(first)).toBe(true)
+      expect(await s.createAuthIfUninitialized(second)).toBe(false)
+      expect(await s.getAuth()).toBe(first)
+    })
+
+    it('auth 首建可接管无账号状态，但不覆盖损坏状态', async () => {
+      const empty = make()
+      await empty.setAuth('{"sessions":[]}')
+      expect(await empty.createAuthIfUninitialized('{"account":{"username":"a"},"sessions":[]}')).toBe(true)
+
+      const damaged = make()
+      await damaged.setAuth('not-json')
+      expect(await damaged.createAuthIfUninitialized('{"account":{"username":"a"},"sessions":[]}')).toBe(false)
+      expect(await damaged.getAuth()).toBe('not-json')
+    })
+
+    it('登录失败计数跨请求持久化并递增退避', async () => {
+      const s = make()
+      expect(await s.getLoginThrottle('k')).toBeUndefined()
+      for (let i = 1; i <= 4; i += 1) {
+        expect(await s.recordLoginFailure('k', 1000)).toEqual({ failures: i, lockedUntil: 0 })
+      }
+      expect(await s.recordLoginFailure('k', 1000)).toEqual({ failures: 5, lockedUntil: 31_000 })
+      expect(await s.recordLoginFailure('k', 40_000)).toEqual({ failures: 6, lockedUntil: 100_000 })
+      expect(await s.getLoginThrottle('k')).toEqual({ failures: 6, lockedUntil: 100_000 })
+      await s.clearLoginThrottle('k')
+      expect(await s.getLoginThrottle('k')).toBeUndefined()
+    })
   })
 }
 
 runContract('InMemoryStorage', () => new InMemoryStorage())
+runContract('SqliteStorage', () => new SqliteStorage(':memory:'))
 runContract('D1Storage(fake D1 over sqlite)', () => new D1Storage(makeFakeD1()))

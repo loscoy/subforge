@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import type { ConversionProfile } from '@subforge/core'
-import type { AgentMessage, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, LoginThrottle, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
 
 /**
  * better-sqlite3 持久化实现。
@@ -46,6 +46,10 @@ export class SqliteStorage implements Storage {
         createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
       );
       CREATE INDEX IF NOT EXISTS idx_sessions_profile ON sessions(profileId, updatedAt DESC);
+      CREATE TABLE IF NOT EXISTS login_throttles (
+        key TEXT PRIMARY KEY, failures INTEGER NOT NULL,
+        lockedUntil INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+      );
     `)
     const cols = this.db.prepare('PRAGMA table_info(subscriptions)').all() as { name: string }[]
     if (!cols.some((c) => c.name === 'userInfo')) {
@@ -264,8 +268,48 @@ export class SqliteStorage implements Storage {
   async setAuth(json: string): Promise<void> {
     this.db.prepare("INSERT INTO kv (k,v) VALUES ('auth',?) ON CONFLICT(k) DO UPDATE SET v=excluded.v").run(json)
   }
+  async createAuthIfUninitialized(json: string): Promise<boolean> {
+    const result = this.db
+      .prepare(
+         `INSERT INTO kv (k,v) VALUES ('auth',?)
+         ON CONFLICT(k) DO UPDATE SET v=excluded.v
+         WHERE CASE WHEN json_valid(kv.v) THEN json_extract(kv.v, '$.account') IS NULL ELSE 0 END`,
+      )
+      .run(json)
+    return result.changes === 1
+  }
+
+  async getLoginThrottle(key: string): Promise<LoginThrottle | undefined> {
+    return this.db.prepare('SELECT failures, lockedUntil FROM login_throttles WHERE key = ?').get(key) as
+      | LoginThrottle
+      | undefined
+  }
+  async recordLoginFailure(key: string, at: number): Promise<LoginThrottle> {
+    return this.db
+      .prepare(loginFailureUpsertSql())
+      .get(key, at) as LoginThrottle
+  }
+  async clearLoginThrottle(key: string): Promise<void> {
+    this.db.prepare('DELETE FROM login_throttles WHERE key = ?').run(key)
+  }
 
   async close(): Promise<void> {
     this.db.close()
   }
+}
+
+function loginFailureUpsertSql(): string {
+  const next = 'MIN(login_throttles.failures + 1, 12)'
+  return `INSERT INTO login_throttles (key, failures, lockedUntil, updatedAt)
+    VALUES (?, 1, 0, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      failures = ${next},
+      lockedUntil = CASE ${next}
+        WHEN 5 THEN excluded.updatedAt + 30000 WHEN 6 THEN excluded.updatedAt + 60000
+        WHEN 7 THEN excluded.updatedAt + 120000 WHEN 8 THEN excluded.updatedAt + 240000
+        WHEN 9 THEN excluded.updatedAt + 480000 WHEN 10 THEN excluded.updatedAt + 960000
+        WHEN 11 THEN excluded.updatedAt + 1920000 WHEN 12 THEN excluded.updatedAt + 3600000
+        ELSE 0 END,
+      updatedAt = excluded.updatedAt
+    RETURNING failures, lockedUntil`
 }

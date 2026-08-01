@@ -1,6 +1,7 @@
 import * as yaml from 'js-yaml'
 import type { ProxyGroupDef, RenderContext } from '../config.js'
 import type { ProxyNode, ProxyType } from '../model.js'
+import { tryCompileLinearRegex } from '../safeRegex.js'
 import { filterSupported } from './support.js'
 
 /** 协议自带 TLS，mihomo 里不写 `tls: true`。 */
@@ -142,8 +143,12 @@ export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
   return base
 }
 
-/** 按 filter / excludeFilter / includeAll / proxies 解析一个组的成员名列表。 */
-export function resolveGroupMembers(group: ProxyGroupDef, nodeNames: string[]): string[] {
+/**
+ * 按 filter / excludeFilter / includeAll / proxies 解析一个组的成员名列表。
+ *
+ * 传入 `warnings` 可收集「正则编译不出来」的降级提示，会经 PipelineOutput 回到预览面板。
+ */
+export function resolveGroupMembers(group: ProxyGroupDef, nodeNames: string[], warnings?: string[]): string[] {
   const members: string[] = []
   if (group.proxies) members.push(...group.proxies)
 
@@ -151,13 +156,21 @@ export function resolveGroupMembers(group: ProxyGroupDef, nodeNames: string[]): 
   if (group.includeAll) pool = [...nodeNames]
   else if (group.filter) pool = [...nodeNames]
 
+  // 坏正则（含 RE2 不支持又有回溯风险的写法）只让**该条筛选**失效，绝不抛出——
+  // 否则单个组的正则就能打挂整份配置的渲染与公开分享出口。
+  //
+  // 失效时保留全部候选，而不是清空组：组一旦为空就会走下面的「兜底 DIRECT」，
+  // 等于让这部分流量绕过代理——那比少过滤几个节点严重得多。两条筛选同一处理，
+  // 不做 filter 清空 / excludeFilter 忽略的不对称。
   if (group.filter) {
-    const re = new RegExp(group.filter)
-    pool = pool.filter((name) => re.test(name))
+    const re = tryCompileLinearRegex(group.filter)
+    if (re) pool = pool.filter((name) => re.test(name))
+    else warnings?.push(`组「${group.name}」的 filter 正则无法安全编译，已忽略该筛选：${group.filter}`)
   }
   if (group.excludeFilter) {
-    const re = new RegExp(group.excludeFilter)
-    pool = pool.filter((name) => !re.test(name))
+    const re = tryCompileLinearRegex(group.excludeFilter)
+    if (re) pool = pool.filter((name) => !re.test(name))
+    else warnings?.push(`组「${group.name}」的 excludeFilter 正则无法安全编译，已忽略该筛选：${group.excludeFilter}`)
   }
   members.push(...pool)
 
@@ -185,7 +198,7 @@ export function renderMihomo(ctx: RenderContext): string {
     const out: Record<string, unknown> = {
       name: g.name,
       type: g.type,
-      proxies: resolveGroupMembers(g, nodeNames),
+      proxies: resolveGroupMembers(g, nodeNames, ctx.warnings),
     }
     if (g.url) out.url = g.url
     if (g.interval) out.interval = g.interval

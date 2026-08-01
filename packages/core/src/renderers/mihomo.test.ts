@@ -49,6 +49,10 @@ describe('resolveGroupMembers', () => {
   it('空组兜底 DIRECT', () => {
     expect(resolveGroupMembers({ name: 'X', type: 'select', filter: 'NOPE' }, names)).toEqual(['DIRECT'])
   })
+  it('病态 filter 不发生灾难性回溯', () => {
+    const hostile = `${'a'.repeat(50_000)}!`
+    expect(resolveGroupMembers({ name: 'X', type: 'select', filter: '(a+)+$' }, [hostile])).toEqual(['DIRECT'])
+  })
 })
 
 describe('renderMihomo', () => {
@@ -66,5 +70,44 @@ describe('renderMihomo', () => {
     expect(cfg['proxy-groups']).toHaveLength(2)
     expect(cfg['proxy-groups'][1].proxies).toEqual(['🇭🇰 HK 01'])
     expect(cfg.rules[cfg.rules.length - 1]).toBe('MATCH,🚀 节点选择')
+  })
+})
+
+describe('坏正则的降级行为（不得中断渲染）', () => {
+  const names = ['HK 01', '回国专线', 'US 02']
+
+  it('负向环视 filter 仍然可用（存量配置的常见写法）', () => {
+    const members = resolveGroupMembers(
+      { name: 'g', type: 'select', includeAll: true, filter: '^(?!.*回国).*$' },
+      names,
+    )
+    expect(members).toEqual(['HK 01', 'US 02'])
+  })
+
+  it('无法编译的 filter 只让该条筛选失效，不抛错也不清空组', () => {
+    const group = { name: 'g', type: 'select' as const, includeAll: true, filter: '^(?!x)(a+)+$' }
+    expect(() => resolveGroupMembers(group, names)).not.toThrow()
+    // 关键：不能退化成空组——空组会兜底成 DIRECT，等于让这部分流量绕过代理
+    expect(resolveGroupMembers(group, names)).toEqual(names)
+    expect(resolveGroupMembers(group, names)).not.toEqual(['DIRECT'])
+  })
+
+  it('无法编译的 excludeFilter 只让该条排除失效，其余成员保留', () => {
+    const members = resolveGroupMembers(
+      { name: 'g', type: 'select', includeAll: true, excludeFilter: '[unclosed' },
+      names,
+    )
+    expect(members).toEqual(names)
+  })
+
+  it('两条筛选的降级行为一致，且各自记一条 warning', () => {
+    const warnings: string[] = []
+    resolveGroupMembers({ name: 'g1', type: 'select', includeAll: true, filter: '^(?!x)(a+)+$' }, names, warnings)
+    resolveGroupMembers({ name: 'g2', type: 'select', includeAll: true, excludeFilter: '[unclosed' }, names, warnings)
+    expect(warnings).toHaveLength(2)
+    expect(warnings[0]).toContain('g1')
+    expect(warnings[0]).toContain('filter')
+    expect(warnings[1]).toContain('g2')
+    expect(warnings[1]).toContain('excludeFilter')
   })
 })

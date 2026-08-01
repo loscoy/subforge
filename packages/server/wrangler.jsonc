@@ -22,6 +22,5 @@
   ],
   "observability": { "enabled": true }
   // Agent（可选）：wrangler secret put OPENAI_BASE_URL / OPENAI_API_KEY / OPENAI_MODEL
-  // 管理口令（可选）：wrangler secret put ADMIN_TOKEN
   // 远端 MCP 口令（可选）：wrangler secret put MCP_TOKEN
 }

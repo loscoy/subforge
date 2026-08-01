@@ -1,8 +1,14 @@
 import type { NodeOp, ProxyGroupDef } from './config.js'
 import type { ProxyNode } from './model.js'
-import { dedupe, drop, emojiOf, keep, regionOf, tagRegions } from './script/utils.js'
+import { tryCompileLinearRegex } from './safeRegex.js'
+import { dedupe, emojiOf, regionOf, tagRegions } from './script/utils.js'
 
-/** 按顺序执行声明式节点操作。 */
+/**
+ * 按顺序执行声明式节点操作。
+ *
+ * 正则类操作（keep / drop / rename）若正则编译不出来，只跳过该条操作，
+ * 不中断整个流水线——坏正则不该让整份配置无法构建。
+ */
 export function applyOperations(nodes: ProxyNode[], ops: NodeOp[]): ProxyNode[] {
   let ns = nodes
   for (const op of ops) {
@@ -16,18 +22,21 @@ export function applyOperations(nodes: ProxyNode[], ops: NodeOp[]): ProxyNode[] 
       case 'sortByName':
         ns = [...ns].sort((a, b) => a.name.localeCompare(b.name))
         break
-      case 'keep':
-        if (op.pattern) ns = keep(ns, op.pattern)
+      case 'keep': {
+        const re = op.pattern ? tryCompileLinearRegex(op.pattern) : undefined
+        if (re) ns = ns.filter((n) => re.test(n.name))
         break
-      case 'drop':
-        if (op.pattern) ns = drop(ns, op.pattern)
+      }
+      case 'drop': {
+        const re = op.pattern ? tryCompileLinearRegex(op.pattern) : undefined
+        if (re) ns = ns.filter((n) => !re.test(n.name))
         break
-      case 'rename':
-        if (op.from) {
-          const re = new RegExp(op.from, 'g')
-          ns = ns.map((n) => ({ ...n, name: n.name.replace(re, op.to) }))
-        }
+      }
+      case 'rename': {
+        const re = op.from ? tryCompileLinearRegex(op.from) : undefined
+        if (re) ns = ns.map((n) => ({ ...n, name: re.replaceAll(n.name, op.to) }))
         break
+      }
     }
   }
   return ns

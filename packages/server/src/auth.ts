@@ -67,9 +67,26 @@ export async function verifyPassword(password: string, account: AuthAccount): Pr
   return timingSafeEqual(toBase64(hash), account.hash)
 }
 
-async function hashToken(token: string): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(token))
+async function sha256Base64(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', encoder.encode(value))
   return toBase64(new Uint8Array(digest))
+}
+
+async function hashToken(token: string): Promise<string> {
+  return sha256Base64(token)
+}
+
+export async function loginThrottleKey(username: string, clientIp: string): Promise<string> {
+  return (await sha256Base64(`${username}\0${clientIp.toLowerCase()}`))
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '')
+}
+
+export function isLoopbackAddress(address: string | undefined): boolean {
+  if (!address) return false
+  const value = address.trim().toLowerCase().replace(/^\[|\]$/g, '')
+  return value === '::1' || value === 'localhost' || value.startsWith('127.') || value.startsWith('::ffff:127.')
 }
 
 export async function loadAuthState(storage: Storage): Promise<AuthState> {

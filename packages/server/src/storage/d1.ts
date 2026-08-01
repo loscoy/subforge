@@ -1,6 +1,6 @@
 import type { ConversionProfile } from '@subforge/core'
 import type { D1Database } from '@cloudflare/workers-types'
-import type { AgentMessage, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, LoginThrottle, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
 
 /**
  * Cloudflare D1 存储实现（异步）。
@@ -220,8 +220,51 @@ export class D1Storage implements Storage {
       .bind(json)
       .run()
   }
+  async createAuthIfUninitialized(json: string): Promise<boolean> {
+    const result = await this.db
+      .prepare(
+         `INSERT INTO kv (k,v) VALUES ('auth',?)
+         ON CONFLICT(k) DO UPDATE SET v=excluded.v
+         WHERE CASE WHEN json_valid(kv.v) THEN json_extract(kv.v, '$.account') IS NULL ELSE 0 END`,
+      )
+      .bind(json)
+      .run()
+    return result.meta.changes === 1
+  }
+
+  async getLoginThrottle(key: string): Promise<LoginThrottle | undefined> {
+    const row = await this.db
+      .prepare('SELECT failures, lockedUntil FROM login_throttles WHERE key = ?')
+      .bind(key)
+      .first<LoginThrottle>()
+    return row ?? undefined
+  }
+  async recordLoginFailure(key: string, at: number): Promise<LoginThrottle> {
+    const row = await this.db.prepare(loginFailureUpsertSql()).bind(key, at).first<LoginThrottle>()
+    if (!row) throw new Error('登录限流状态写入失败')
+    return row
+  }
+  async clearLoginThrottle(key: string): Promise<void> {
+    await this.db.prepare('DELETE FROM login_throttles WHERE key = ?').bind(key).run()
+  }
 
   async close(): Promise<void> {
     /* D1 无需显式关闭 */
   }
+}
+
+function loginFailureUpsertSql(): string {
+  const next = 'MIN(login_throttles.failures + 1, 12)'
+  return `INSERT INTO login_throttles (key, failures, lockedUntil, updatedAt)
+    VALUES (?, 1, 0, ?)
+    ON CONFLICT(key) DO UPDATE SET
+      failures = ${next},
+      lockedUntil = CASE ${next}
+        WHEN 5 THEN excluded.updatedAt + 30000 WHEN 6 THEN excluded.updatedAt + 60000
+        WHEN 7 THEN excluded.updatedAt + 120000 WHEN 8 THEN excluded.updatedAt + 240000
+        WHEN 9 THEN excluded.updatedAt + 480000 WHEN 10 THEN excluded.updatedAt + 960000
+        WHEN 11 THEN excluded.updatedAt + 1920000 WHEN 12 THEN excluded.updatedAt + 3600000
+        ELSE 0 END,
+      updatedAt = excluded.updatedAt
+    RETURNING failures, lockedUntil`
 }
