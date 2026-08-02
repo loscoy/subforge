@@ -39,6 +39,15 @@ describe('sing-box renderer', () => {
     expect(o.type).toBe('shadowsocks')
     expect(o.method).toBe('aes-256-gcm')
   })
+  // 漏掉这个分支时 transport 整个不写，节点被当成裸 TCP 发出去——配置能加载，但连不上
+  it('httpupgrade 有对应的 transport，不会静默降级成裸 TCP', () => {
+    const n = makeNode({
+      name: 'hu', type: 'vmess', server: 'a.com', port: 443, uuid: 'u1', cipher: 'auto',
+      tls: { enabled: true }, transport: { network: 'httpupgrade', path: '/p', host: 'cdn.com' }, meta: {},
+    })
+    const o = nodeToSingbox(n)
+    expect(o.transport).toEqual({ type: 'httpupgrade', path: '/p', host: 'cdn.com' })
+  })
   it('规则翻译', () => {
     expect(clashRuleToSingbox('DOMAIN-SUFFIX,x.com,G').obj).toEqual({ domain_suffix: ['x.com'], outbound: 'G' })
     expect(clashRuleToSingbox('MATCH,G').final).toBe('G')

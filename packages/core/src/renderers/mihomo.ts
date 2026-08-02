@@ -122,16 +122,29 @@ export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
   // 传输层
   const t = n.transport
   if (t && t.network && t.network !== 'tcp') {
-    base.network = t.network
-    if (t.network === 'ws') {
+    // httpupgrade 在 mihomo 里不是合法的 network 值，而是 ws 底下的一个开关。
+    // 原样写出去 mihomo 会拒绝加载**整份**配置，不只是这一个节点失效。
+    const network = t.network === 'httpupgrade' ? 'ws' : t.network
+    base.network = network
+    if (network === 'ws') {
       base['ws-opts'] = {
         ...(t.path ? { path: t.path } : {}),
         ...(t.host ? { headers: { Host: t.host } } : {}),
         ...(t.wsHeaders ? { headers: { ...(t.host ? { Host: t.host } : {}), ...t.wsHeaders } } : {}),
+        ...(t.network === 'httpupgrade' ? { 'v2ray-http-upgrade': true } : {}),
       }
-    } else if (t.network === 'grpc') {
+    } else if (network === 'grpc') {
       base['grpc-opts'] = { 'grpc-service-name': t.serviceName || t.path || '' }
-    } else if (t.network === 'h2' || t.network === 'http') {
+    } else if (network === 'http') {
+      // HTTP 伪装。mihomo 按 network 选 opts 键，network: http 只读 http-opts——
+      // 写成 h2-opts 会被整个忽略，Host 头跟着丢失，服务端按 Host 分流时直接断连。
+      // 形态也与 h2 不同：path 是数组，headers 的值同样是数组。
+      base['http-opts'] = {
+        method: 'GET',
+        ...(t.path ? { path: [t.path] } : {}),
+        ...(t.host ? { headers: { Host: [t.host] } } : {}),
+      }
+    } else if (network === 'h2') {
       base['h2-opts'] = {
         ...(t.path ? { path: t.path } : {}),
         ...(t.host ? { host: [t.host] } : {}),
