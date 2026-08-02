@@ -31,6 +31,43 @@ describe('nodeToMihomo', () => {
     expect(m.sni).toBe('us.com')
     expect(m.password).toBe('pw')
   })
+
+  // network: http 是 HTTP 伪装，mihomo 只读 http-opts；写成 h2-opts 会被整个忽略，
+  // Host 头随之丢失，服务端按 Host 分流时直接断开（表现为 ERR_CONNECTION_CLOSED）。
+  // http-opts 与 h2-opts 的形态也不同：path 是数组，headers 的值也是数组。
+  it('network=http 写 http-opts（path 与 header 值都是数组）', () => {
+    const n = makeNode({
+      name: 'http-obfs', type: 'vmess', server: 'a.com', port: 80, uuid: 'u1', cipher: 'auto',
+      transport: { network: 'http', path: '/video', host: 'cdn.com' }, meta: {},
+    })
+    const m = nodeToMihomo(n)
+    expect(m.network).toBe('http')
+    expect(m['h2-opts']).toBeUndefined()
+    expect(m['http-opts']).toEqual({ method: 'GET', path: ['/video'], headers: { Host: ['cdn.com'] } })
+  })
+
+  it('network=h2 仍写 h2-opts（path 字符串、host 数组）', () => {
+    const n = makeNode({
+      name: 'h2', type: 'vmess', server: 'a.com', port: 443, uuid: 'u1', cipher: 'auto',
+      tls: { enabled: true }, transport: { network: 'h2', path: '/p', host: 'cdn.com' }, meta: {},
+    })
+    const m = nodeToMihomo(n)
+    expect(m.network).toBe('h2')
+    expect(m['http-opts']).toBeUndefined()
+    expect(m['h2-opts']).toEqual({ path: '/p', host: ['cdn.com'] })
+  })
+
+  // httpupgrade 在 mihomo 里不是合法的 network 值，而是 ws 的一个开关。
+  // 原样写出去 mihomo 会拒绝加载**整份**配置，不只是这一个节点失效。
+  it('httpupgrade 落成 ws + v2ray-http-upgrade，而不是非法的 network 值', () => {
+    const n = makeNode({
+      name: 'hu', type: 'vmess', server: 'a.com', port: 443, uuid: 'u1', cipher: 'auto',
+      tls: { enabled: true }, transport: { network: 'httpupgrade', path: '/p', host: 'cdn.com' }, meta: {},
+    })
+    const m = nodeToMihomo(n)
+    expect(m.network).toBe('ws')
+    expect(m['ws-opts']).toEqual({ path: '/p', headers: { Host: 'cdn.com' }, 'v2ray-http-upgrade': true })
+  })
 })
 
 describe('resolveGroupMembers', () => {

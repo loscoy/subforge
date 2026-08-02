@@ -92,7 +92,12 @@ export function nodeToSingbox(n: ProxyNode): Record<string, unknown> {
     } else if (t.network === 'grpc') {
       o.transport = { type: 'grpc', service_name: t.serviceName || t.path || '' }
     } else if (t.network === 'http' || t.network === 'h2') {
+      // sing-box 的 http transport 同时覆盖 HTTP 伪装与 h2（开了 TLS 即 HTTP/2），两者合并是对的
       o.transport = { type: 'http', ...(t.path ? { path: t.path } : {}), ...(t.host ? { host: [t.host] } : {}) }
+    } else if (t.network === 'httpupgrade') {
+      // 独立的 transport 类型。漏掉分支的话 transport 整个不写，节点被当成裸 TCP 发出去：
+      // 配置能加载，但连不上。注意 host 在这里是字符串，与上面 http 的数组不同。
+      o.transport = { type: 'httpupgrade', ...(t.path ? { path: t.path } : {}), ...(t.host ? { host: t.host } : {}) }
     }
   }
   return o

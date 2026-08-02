@@ -19,6 +19,7 @@ import type { AgentModelConfig, AgentRunner } from '../agent/index.js'
 import { fallbackTitle, generateSessionTitle } from '../agent/index.js'
 import { probeAgentModel } from '../agent/probe.js'
 import type { ServerConfig } from '../config.js'
+import { log } from '../log.js'
 import { handleMcpHttpRequest } from '../mcp/http.js'
 import { timingSafeEqual } from '../security.js'
 import {
@@ -505,14 +506,23 @@ export function createApp(deps: AppDeps): Hono {
       // 客户端断开（用户点了停止）时中止模型生成，别继续烧 token
       const ac = new AbortController()
       stream.onAbort(() => ac.abort())
+      const startedAt = Date.now()
+      // writeMs 与 elapsedMs 一减，就把「等模型吐事件」和「我们自己写 SSE」拆开了
+      let events = 0
+      let writeMs = 0
       try {
         for await (const ev of agent.runStream(threadId, message, context, ac.signal)) {
+          events += 1
+          const beforeWrite = Date.now()
           await stream.writeSSE({ data: JSON.stringify(ev) })
+          writeMs += Date.now() - beforeWrite
         }
       } catch (e) {
         if (!ac.signal.aborted) {
           await stream.writeSSE({ data: JSON.stringify({ type: 'error', error: e instanceof Error ? e.message : String(e) }) })
         }
+      } finally {
+        log('agent.sse.end', { threadId, events, writeMs, elapsedMs: Date.now() - startedAt, aborted: ac.signal.aborted })
       }
     })
   })

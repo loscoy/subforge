@@ -41,6 +41,16 @@ const loopingToolCallStream = () => {
   })
 }
 
+/** 开局就崩：模拟上游连接中断，本轮一个字都没产出 */
+const explodingStream = async () => ({
+  stream: new ReadableStream({
+    start(controller) {
+      controller.enqueue({ type: 'stream-start' as const, warnings: [] })
+      controller.error(new Error('上游连接中断'))
+    },
+  }),
+})
+
 describe('AiSdkAgentRunner（mock 模型）', () => {
   it('运行后把 user/assistant 写入记忆，且系统提示含长期记忆', async () => {
     const storage = new InMemoryStorage()
@@ -123,5 +133,27 @@ describe('AiSdkAgentRunner（mock 模型）', () => {
     const msgs = await storage.listMessages('t')
     expect(msgs.at(-1)!.role).toBe('assistant')
     expect(msgs.at(-1)!.content).toContain('上限 3 步')
+  })
+
+  it('本轮没产出时用户消息仍然落库，且落在跑模型之前', async () => {
+    const storage = new InMemoryStorage()
+    let rolesWhenModelCalled: string[] = []
+    const model = new MockLanguageModelV4({
+      doStream: (async () => {
+        // 模型被调用的这一刻用户消息就该已经在库里：worker 若在此之后
+        // 被平台按 CPU 超限掐断，收尾代码一行都跑不到
+        rolesWhenModelCalled = (await storage.listMessages('t')).map((m) => m.role)
+        return explodingStream()
+      }) as any,
+    })
+    const runner = new AiSdkAgentRunner({ storage, runner: new NodeVmRunner() }, cfg, 3, () => model)
+
+    for await (const ev of runner.runStream('t', '配置是不是哪里有问题？')) void ev
+
+    expect(rolesWhenModelCalled).toEqual(['user'])
+    const msgs = await storage.listMessages('t')
+    // 只留用户那条：空 assistant 会被下一轮的 provider 拒收，但用户说过的话不能丢
+    expect(msgs.map((m) => m.role)).toEqual(['user'])
+    expect(msgs[0]!.content).toBe('配置是不是哪里有问题？')
   })
 })
