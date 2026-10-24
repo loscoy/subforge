@@ -2,21 +2,21 @@ import Editor, { type Monaco, type OnMount } from '@monaco-editor/react'
 import { Badge, Box, Group, SimpleGrid, Skeleton, Stack, Text, useMantineColorScheme } from '@mantine/core'
 import { useEffect, useRef, useState } from 'react'
 import { api } from '../api'
-import type { PreviewResult } from '../types'
+import type { PreviewResult, Profile } from '../types'
 
 interface Props {
   profileId: string
   value: string
   onChange: (v: string) => void
   dts: string
+  draft: Pick<Profile, 'profile' | 'subscriptionIds' | 'target'>
 }
 
 /** Monaco 脚本编辑器：挂载 .d.ts 提供补全，改动后防抖对真实节点跑预览。 */
-export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
+export function ScriptEditor({ profileId, value, onChange, dts, draft }: Props) {
   const { colorScheme } = useMantineColorScheme()
   const [preview, setPreview] = useState<PreviewResult | null>(null)
   const [running, setRunning] = useState(false)
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const editorRef = useRef<Parameters<OnMount>[0] | null>(null)
 
@@ -35,20 +35,19 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
     return () => observer.disconnect()
   }, [])
 
-  const runPreview = (script: string) => {
-    setRunning(true)
-    api
-      .preview(profileId, script)
-      .then(setPreview)
-      .catch((e) => setPreview({ ok: false, before: [], after: [], logs: [], error: String(e) }))
-      .finally(() => setRunning(false))
-  }
-
-  // 首次加载跑一次
+  // 改动发生时立即使旧请求失效，包括防抖等待期间与卸载后。
+  const draftJson = JSON.stringify(draft)
   useEffect(() => {
-    runPreview(value)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profileId])
+    let active = true
+    setRunning(true)
+    const timer = setTimeout(() => {
+      api.preview(profileId, value, JSON.parse(draftJson))
+        .then((result) => { if (active) setPreview(result) })
+        .catch((error) => { if (active) setPreview({ ok: false, before: [], after: [], logs: [], error: String(error) }) })
+        .finally(() => { if (active) setRunning(false) })
+    }, 600)
+    return () => { active = false; clearTimeout(timer) }
+  }, [profileId, value, draftJson])
 
   const beforeMount = (monaco: Monaco) => {
     monaco.languages.typescript.javascriptDefaults.addExtraLib(dts, 'subforge-script.d.ts')
@@ -61,8 +60,6 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
   const handleChange = (v: string | undefined) => {
     const next = v ?? ''
     onChange(next)
-    if (timer.current) clearTimeout(timer.current)
-    timer.current = setTimeout(() => runPreview(next), 600)
   }
 
   return (
@@ -129,6 +126,13 @@ export function ScriptEditor({ profileId, value, onChange, dts }: Props) {
             </>
           )}
         </Box>
+        {preview?.warnings?.map((warning, index) => <Text key={index} c="orange" size="sm">诊断：{warning}</Text>)}
+        {preview?.stages?.map((stage, index) => <details key={index}>
+          <summary>{stage.stage}：{stage.before} → {stage.after}（+{stage.added.length} / −{stage.removed.length}）</summary>
+          <Text size="xs">{stage.reason}</Text>
+          <Text size="xs">移除：{stage.removed.map((n) => n.name).join('、') || '无'}</Text>
+          <Text size="xs">加入：{stage.added.map((n) => n.name).join('、') || '无'}</Text>
+        </details>)}
         {preview && preview.logs.length > 0 && <div className="logs">{preview.logs.join('\n')}</div>}
       </Box>
     </SimpleGrid>

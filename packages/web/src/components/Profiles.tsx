@@ -13,6 +13,7 @@ import {
   Group,
   Menu,
   Modal,
+  MultiSelect,
   NativeSelect,
   ScrollArea,
   Skeleton,
@@ -243,39 +244,12 @@ export function Profiles({
   )
 }
 
-interface OpForm {
-  dedupe: boolean
-  tagRegions: boolean
-  sortByName: boolean
-  dropPattern: string
-  keepPattern: string
-  renameFrom: string
-  renameTo: string
-}
+type OpForm = NodeOp[]
 function parseOps(ops: NodeOp[] = []): OpForm {
-  const f: OpForm = { dedupe: false, tagRegions: false, sortByName: false, dropPattern: '', keepPattern: '', renameFrom: '', renameTo: '' }
-  for (const o of ops) {
-    if (o.op === 'dedupe') f.dedupe = true
-    else if (o.op === 'tagRegions') f.tagRegions = true
-    else if (o.op === 'sortByName') f.sortByName = true
-    else if (o.op === 'drop') f.dropPattern = o.pattern
-    else if (o.op === 'keep') f.keepPattern = o.pattern
-    else if (o.op === 'rename') {
-      f.renameFrom = o.from
-      f.renameTo = o.to
-    }
-  }
-  return f
+  return structuredClone(ops)
 }
 function buildOps(f: OpForm): NodeOp[] {
-  const ops: NodeOp[] = []
-  if (f.dropPattern) ops.push({ op: 'drop', pattern: f.dropPattern })
-  if (f.keepPattern) ops.push({ op: 'keep', pattern: f.keepPattern })
-  if (f.renameFrom) ops.push({ op: 'rename', from: f.renameFrom, to: f.renameTo })
-  if (f.dedupe) ops.push({ op: 'dedupe' })
-  if (f.tagRegions) ops.push({ op: 'tagRegions' })
-  if (f.sortByName) ops.push({ op: 'sortByName' })
-  return ops
+  return f
 }
 
 type Section = 'nodes' | 'groups' | 'rules' | 'script'
@@ -310,6 +284,7 @@ function ProfileDetail({
   const [target, setTarget] = useState(profile.target)
   const [subIds, setSubIds] = useState<string[]>(profile.subscriptionIds)
   const [opForm, setOpForm] = useState<OpForm>(parseOps(profile.profile.operations))
+  const [baseConfig, setBaseConfig] = useState(profile.profile)
   const [groups, setGroups] = useState<ProxyGroupDef[]>(profile.profile.groups || [])
   const [rules, setRules] = useState<string[]>(profile.profile.rules || [])
   const [script, setScript] = useState(profile.script || '')
@@ -341,7 +316,11 @@ function ProfileDetail({
   const [templateSaving, setTemplateSaving] = useState(false)
   const [pendingTemplate, setPendingTemplate] = useState<UITemplate | null>(null)
   const [agentReloading, setAgentReloading] = useState(false)
+  const [serverChanged, setServerChanged] = useState(false)
+  const reloadRequest = useRef(0)
   const [saveSlot, setSaveSlot] = useState<HTMLElement | null>(null)
+  const [shareBusy, setShareBusy] = useState(false)
+  const previewRequest = useRef(0)
 
   useEffect(() => {
     setSaveSlot(document.getElementById('sf-save-slot'))
@@ -351,30 +330,41 @@ function ProfileDetail({
   const scriptActive = !!script.trim()
   const groupsRulesIgnored = scriptActive && isOverride
   const shareUrl = `${location.origin}/sub/${profile.token}`
+  const changeShare = async (action: 'rotate' | 'disable' | 'enable') => {
+    if (!window.confirm(action === 'disable' ? '禁用分享后，客户端将无法更新此订阅。继续？' : '将生成新分享链接，旧链接会失效。继续？')) return
+    setShareBusy(true)
+    try { onSaved(await api.updateShare(profile.id, action)); ok('分享设置已更新') }
+    catch (error) { fail(error) }
+    finally { setShareBusy(false) }
+  }
   const autoRegion = groups.some((g) => g.autoRegion)
-  const setOp = (patch: Partial<OpForm>) => setOpForm((f) => ({ ...f, ...patch }))
+  const setOp = (index: number, op: NodeOp) => setOpForm((ops) => ops.map((value, i) => i === index ? op : value))
 
-  const snapshot = (v: { name: string; target: string; subIds: string[]; opForm: OpForm; groups: ProxyGroupDef[]; rules: string[]; script: string }) =>
-    JSON.stringify(v)
+  const snapshot = (v: { name: string; target: string; subIds: string[]; opForm: OpForm; groups: ProxyGroupDef[]; rules: string[]; script: string }, config = baseConfig) =>
+    JSON.stringify({ ...v, extraConfig: config.extraConfig, ruleProviders: config.ruleProviders })
   const [baseline, setBaseline] = useState(() =>
     snapshot({ name: profile.name, target: profile.target, subIds: profile.subscriptionIds, opForm: parseOps(profile.profile.operations), groups: profile.profile.groups || [], rules: profile.profile.rules || [], script: profile.script || '' }),
   )
   const dirty = useMemo(
     () => snapshot({ name, target, subIds, opForm, groups, rules, script }) !== baseline,
-    [name, target, subIds, opForm, groups, rules, script, baseline],
+    [name, target, subIds, opForm, groups, rules, script, baseline, baseConfig],
   )
+  const editorState = useRef({ dirty, snapshot: '' })
+  editorState.current = { dirty, snapshot: snapshot({ name, target, subIds, opForm, groups, rules, script }) }
 
   const applyServerProfile = (p: Profile) => {
+    setServerChanged(false)
     setName(p.name)
     setTarget(p.target)
     setSubIds(p.subscriptionIds)
+    setBaseConfig(p.profile)
     setOpForm(parseOps(p.profile.operations))
     setGroups(p.profile.groups || [])
     setRules(p.profile.rules || [])
     setScript(p.script || '')
     setSavedAt(p.updatedAt)
     setBaseline(
-      snapshot({ name: p.name, target: p.target, subIds: p.subscriptionIds, opForm: parseOps(p.profile.operations), groups: p.profile.groups || [], rules: p.profile.rules || [], script: p.script || '' }),
+      snapshot({ name: p.name, target: p.target, subIds: p.subscriptionIds, opForm: parseOps(p.profile.operations), groups: p.profile.groups || [], rules: p.profile.rules || [], script: p.script || '' }, p.profile),
     )
   }
 
@@ -387,31 +377,41 @@ function ProfileDetail({
     reloadTemplates()
   }, [])
 
-  // Agent（右侧抽屉）改动当前配置后，从服务端拉最新状态
+  const reloadProfile = async (discard = false) => {
+    if (editorState.current.dirty && !discard) { setServerChanged(true); return }
+    if (discard && !window.confirm('重新加载将丢弃本地未保存的更改。继续？')) return
+    const request = ++reloadRequest.current
+    const before = editorState.current.snapshot
+    setAgentReloading(true)
+    try {
+      const p = await api.getProfile(profile.id)
+      if (request !== reloadRequest.current) return
+      // 请求期间开始编辑也不能被响应覆盖。
+      if (editorState.current.snapshot !== before || (!discard && editorState.current.dirty)) { setServerChanged(true); return }
+      applyServerProfile(p)
+      onSaved(p)
+      ok('已刷新服务端配置')
+    } catch (error) { fail(error) }
+    finally { if (request === reloadRequest.current) setAgentReloading(false) }
+  }
+
+  // 仅实际应用产生此事件；已编辑或请求期间新增的修改均保留。
   useEffect(() => {
-    const onAgentChanged = () => {
-      setAgentReloading(true)
-      api
-        .getProfile(profile.id)
-        .then((p) => {
-          applyServerProfile(p)
-          onSaved(p)
-          ok('已根据 Agent 的改动刷新')
-        })
-        .catch(fail)
-        .finally(() => setAgentReloading(false))
-    }
+    const onAgentChanged = () => { void reloadProfile() }
     window.addEventListener(AGENT_CHANGED_EVENT, onAgentChanged)
-    return () => window.removeEventListener(AGENT_CHANGED_EVENT, onAgentChanged)
+    return () => {
+      reloadRequest.current++
+      window.removeEventListener(AGENT_CHANGED_EVENT, onAgentChanged)
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile.id])
 
   const save = async () => {
     if (saving) return
     setSaving(true)
-    const profileObj: ConversionProfile = { operations: buildOps(opForm), groups, rules, ruleProviders: profile.profile.ruleProviders }
+    const profileObj: ConversionProfile = { ...baseConfig, operations: buildOps(opForm), groups, rules }
     try {
-      const p = await api.updateProfile(profile.id, { name, target, subscriptionIds: subIds, script: script || undefined, profile: profileObj })
+      const p = await api.updateProfile(profile.id, { name, target, subscriptionIds: subIds, script, profile: profileObj, updatedAt: profile.updatedAt })
       ok('已保存')
       setSavedAt(p.updatedAt)
       setBaseline(snapshot({ name, target, subIds, opForm, groups, rules, script }))
@@ -428,7 +428,7 @@ function ProfileDetail({
     if (!label || templateSaving) return
     setTemplateSaving(true)
     try {
-      await api.createTemplate({ name: label, description: '（我的模板）', profile: { operations: buildOps(opForm), groups, rules }, script: script || undefined })
+      await api.createTemplate({ name: label, description: '（我的模板）', profile: { ...baseConfig, operations: buildOps(opForm), groups, rules }, script })
       await reloadTemplates()
       setTemplateOpen(false)
       ok(`已存为模板「${label}」`)
@@ -448,6 +448,7 @@ function ProfileDetail({
   const confirmApplyTemplate = () => {
     const t = pendingTemplate
     if (!t) return
+    setBaseConfig(t.profile)
     setOpForm(parseOps(t.profile.operations))
     setGroups(structuredClone(t.profile.groups))
     setRules([...t.profile.rules])
@@ -457,11 +458,12 @@ function ProfileDetail({
 
   /** 拉一次内联预览。失败不弹 toast——就地显示即可，这里是常驻面板不是用户主动操作。 */
   const loadPreview = async () => {
-    if (previewLoading) return
+    const request = ++previewRequest.current
     setPreviewLoading(true)
     setPreviewError('')
     try {
       const o = await api.output(profile.id)
+      if (request !== previewRequest.current) return
       setPreviewWarnings(o.warnings ?? [])
       if (o.ok) setPreview(o.config || '')
       else {
@@ -469,11 +471,12 @@ function ProfileDetail({
         setPreviewError(`暂时无法生成：${o.error}`)
       }
     } catch (e) {
+      if (request !== previewRequest.current) return
       setPreview(null)
       setPreviewWarnings([])
       setPreviewError(String(e))
     } finally {
-      setPreviewLoading(false)
+      if (request === previewRequest.current) setPreviewLoading(false)
     }
   }
 
@@ -484,8 +487,9 @@ function ProfileDetail({
     setPreviewWarnings([])
     if (!previewOpen) return
     void loadPreview()
+    return () => { previewRequest.current++ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [profile.id, previewOpen])
+  }, [profile.id, profile.updatedAt, previewOpen])
 
   const viewOutput = async () => {
     if (outputLoading) return
@@ -656,6 +660,10 @@ function ProfileDetail({
 
   return (
     <Box className="profile-detail-body">
+      {serverChanged && <Alert color="orange" mx={20} mt={12} title="服务端配置已更新">
+        已保留本地未保存的更改。请先复制需要保留的内容，再重新加载。
+        <Button variant="light" color="orange" size="xs" ml="sm" loading={agentReloading} onClick={() => void reloadProfile(true)}>重新加载服务端配置</Button>
+      </Alert>}
       {/* 头部：名称 / 输出格式 / 分享链接 / 更多 */}
       <Box px={20} pt={16} pb={6}>
         {/* 名称即标题：无框大字，hover/聚焦才显出输入框，是这个配置的身份而不是又一个表单项 */}
@@ -693,7 +701,7 @@ function ProfileDetail({
             <Group gap={6} wrap="nowrap">
               <TextInput
                 readOnly
-                value={shareUrl}
+                value={profile.shareDisabled ? '分享已禁用' : shareUrl}
                 onFocus={(e) => e.currentTarget.select()}
                 style={{ flex: 1, minWidth: 0 }}
                 styles={{ input: { fontFamily: 'var(--mantine-font-family-monospace)', fontSize: 11.5, background: 'var(--sf-surface-subtle)' } }}
@@ -701,12 +709,16 @@ function ProfileDetail({
               <CopyButton value={shareUrl} timeout={1600}>
                 {({ copied, copy }) => (
                   <Tooltip label={copied ? '已复制' : '复制'}>
-                    <ActionIcon variant="default" size={36} radius={7} onClick={copy} aria-label="复制分享链接">
+                    <ActionIcon disabled={profile.shareDisabled} variant="default" size={36} radius={7} onClick={copy} aria-label="复制分享链接">
                       {copied ? <ICheck size={15} /> : <ICopy size={15} />}
                     </ActionIcon>
                   </Tooltip>
                 )}
               </CopyButton>
+            </Group>
+            <Group gap="xs" mt={4}>
+              <Button variant="subtle" size="compact-xs" disabled={shareBusy} onClick={() => void changeShare(profile.shareDisabled ? 'enable' : 'rotate')}>{profile.shareDisabled ? '启用新链接' : '轮换链接'}</Button>
+              {!profile.shareDisabled && <Button color="red" variant="subtle" size="compact-xs" disabled={shareBusy} onClick={() => void changeShare('disable')}>禁用分享</Button>}
             </Group>
           </Box>
         </Box>
@@ -766,18 +778,30 @@ function ProfileDetail({
       {/* 节点处理 */}
       {section === 'nodes' && (
         <Box px={20} py={16} className="section-pane">
-          {/* 开关式功能项：这三个是「启用/关闭」而非「多选」，Switch 才是对的语义与观感 */}
-          <Group mb={16} gap={22}>
-            <Switch label="去重" checked={opForm.dedupe} onChange={(e) => setOp({ dedupe: e.currentTarget.checked })} />
-            <Switch label="地区打标签" checked={opForm.tagRegions} onChange={(e) => setOp({ tagRegions: e.currentTarget.checked })} />
-            <Switch label="按名称排序" checked={opForm.sortByName} onChange={(e) => setOp({ sortByName: e.currentTarget.checked })} />
-          </Group>
-          <Box className="form-grid form-grid-2">
-            <TextInput label="剔除节点（正则）" placeholder="过期|剩余|官网|流量" value={opForm.dropPattern} onChange={(e) => setOp({ dropPattern: e.currentTarget.value })} />
-            <TextInput label="只保留节点（正则）" placeholder="留空 = 不限" value={opForm.keepPattern} onChange={(e) => setOp({ keepPattern: e.currentTarget.value })} />
-            <TextInput label="重命名 · 匹配（正则）" value={opForm.renameFrom} onChange={(e) => setOp({ renameFrom: e.currentTarget.value })} />
-            <TextInput label="重命名 · 替换为" value={opForm.renameTo} onChange={(e) => setOp({ renameTo: e.currentTarget.value })} />
-          </Box>
+          <Stack gap="sm">
+            <Text size="sm" c="dimmed">按从上到下的顺序执行，允许添加多条同类操作。</Text>
+            {opForm.map((op, index) => (
+              <Card key={index} withBorder padding="sm">
+                <Group justify="space-between" mb="xs">
+                  <Text size="sm">{index + 1}. {({ dedupe: '去重', tagRegions: '地区打标签', sortByName: '按名称排序', keep: '只保留', drop: '剔除', rename: '重命名', keepSource: '按来源保留', prefixSource: '来源前缀' })[op.op]}</Text>
+                  <Group gap={4}>
+                    <Button size="compact-xs" variant="subtle" disabled={index === 0} onClick={() => setOpForm((ops) => { const next = [...ops]; [next[index - 1], next[index]] = [next[index]!, next[index - 1]!]; return next })}>上移</Button>
+                    <Button size="compact-xs" variant="subtle" disabled={index === opForm.length - 1} onClick={() => setOpForm((ops) => { const next = [...ops]; [next[index], next[index + 1]] = [next[index + 1]!, next[index]!]; return next })}>下移</Button>
+                    <Button size="compact-xs" variant="subtle" color="red" onClick={() => setOpForm((ops) => ops.filter((_, i) => i !== index))}>删除操作</Button>
+                  </Group>
+                </Group>
+                {(op.op === 'keep' || op.op === 'drop') && <TextInput label="匹配正则" value={op.pattern} onChange={(e) => setOp(index, { ...op, pattern: e.currentTarget.value })} />}
+                {op.op === 'rename' && <Group grow><TextInput label="匹配正则" value={op.from} onChange={(e) => setOp(index, { ...op, from: e.currentTarget.value })} /><TextInput label="替换为" value={op.to} onChange={(e) => setOp(index, { ...op, to: e.currentTarget.value })} /></Group>}
+                {op.op === 'keepSource' && <MultiSelect label="保留来源" data={subs.map((s) => ({ value: s.id, label: s.name }))} value={op.sourceIds} onChange={(sourceIds) => setOp(index, { ...op, sourceIds })} />}
+                {op.op === 'prefixSource' && <Group grow><NativeSelect label="来源" data={[{ value: '', label: '选择来源' }, ...subs.map((s) => ({ value: s.id, label: s.name }))]} value={op.sourceId} onChange={(e) => setOp(index, { ...op, sourceId: e.currentTarget.value })} /><TextInput label="前缀" value={op.prefix} onChange={(e) => setOp(index, { ...op, prefix: e.currentTarget.value })} /></Group>}
+              </Card>
+            ))}
+            <NativeSelect aria-label="添加节点操作" value="" onChange={(e) => {
+              const op = e.currentTarget.value as NodeOp['op']
+              if (!op) return
+              setOpForm((ops) => [...ops, op === 'rename' ? { op, from: '', to: '' } : op === 'keep' || op === 'drop' ? { op, pattern: '' } : op === 'keepSource' ? { op, sourceIds: [] } : op === 'prefixSource' ? { op, sourceId: '', prefix: '' } : { op }])
+            }} data={[{ value: '', label: '添加操作…' }, { value: 'keep', label: '只保留' }, { value: 'drop', label: '剔除' }, { value: 'rename', label: '重命名' }, { value: 'dedupe', label: '去重' }, { value: 'tagRegions', label: '地区打标签' }, { value: 'sortByName', label: '按名称排序' }, { value: 'keepSource', label: '按来源保留' }, { value: 'prefixSource', label: '来源前缀' }]} />
+          </Stack>
           {groupsRulesIgnored && (
             <Text c="dimmed" fz="sm" mt={12}>
               节点处理在脚本之前生效，可与 override 脚本共存。
@@ -830,6 +854,7 @@ function ProfileDetail({
                       </ActionIcon>
                     </Box>
                     <Box className="form-grid form-grid-2" mt="sm">
+                      <MultiSelect label="限定来源（留空不限）" disabled={groupsRulesIgnored} data={subs.map((s) => ({ value: s.id, label: s.name }))} value={g.sourceIds || []} onChange={(sourceIds) => updateGroup(idx, { sourceIds })} />
                       <TextInput label="包含过滤（正则，可选）" disabled={groupsRulesIgnored} value={g.filter || ''} onChange={(e) => updateGroup(idx, { filter: e.currentTarget.value })} />
                       <TextInput label="排除过滤（正则，可选）" disabled={groupsRulesIgnored} value={g.excludeFilter || ''} onChange={(e) => updateGroup(idx, { excludeFilter: e.currentTarget.value })} />
                     </Box>
@@ -894,7 +919,7 @@ function ProfileDetail({
             )}
           </Text>
           <Suspense fallback={<DetailSkeleton />}>
-            <ScriptEditor profileId={profile.id} value={script} onChange={setScript} dts={dts} />
+            <ScriptEditor profileId={profile.id} value={script} onChange={setScript} dts={dts} draft={{ target, subscriptionIds: subIds, profile: { ...baseConfig, operations: opForm, groups, rules } }} />
           </Suspense>
         </Box>
       )}

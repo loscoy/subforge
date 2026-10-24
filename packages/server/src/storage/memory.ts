@@ -1,4 +1,5 @@
-import type { AgentMessage, LoginThrottle, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, ChangeDraft, RefreshState, LoginThrottle, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import { draftValues } from './draftSql.js'
 
 /** 纯内存实现：用于测试，也可作无持久化的临时运行。方法为 async 以符合 Storage 接口。 */
 export class InMemoryStorage implements Storage {
@@ -12,6 +13,34 @@ export class InMemoryStorage implements Storage {
   private settings: string | undefined
   private auth: string | undefined
   private loginThrottles = new Map<string, LoginThrottle>()
+  private drafts = new Map<string, ChangeDraft>()
+  private refreshStates = new Map<string, RefreshState>()
+
+  async getRefreshState(id: string) { return structuredClone(this.refreshStates.get(id)) }
+  async compareRefreshState(id: string, expected: RefreshState | undefined, next: RefreshState) {
+    if (JSON.stringify(this.refreshStates.get(id)) !== JSON.stringify(expected)) return false
+    this.refreshStates.set(id, structuredClone(next))
+    return true
+  }
+
+  async listDrafts() { return structuredClone([...this.drafts.values()]) }
+  async getDraft(id: string) { return structuredClone(this.drafts.get(id)) }
+  async putDraft(draft: ChangeDraft) { this.drafts.set(draft.id, structuredClone(draft)) }
+  async deleteDraft(id: string) { this.drafts.delete(id) }
+  async applyDraftChange(draft: ChangeDraft, version?: Version): Promise<boolean> {
+    if (JSON.stringify(this.drafts.get(draft.id)) !== JSON.stringify(draft)) return false
+    const map = (draft.entity === 'profiles' ? this.profiles : draft.entity === 'subscriptions' ? this.subs : this.templates) as Map<string, NonNullable<ChangeDraft['before']>>
+    const current = map.get(draft.entityId) ?? null
+    if (!!current !== !!draft.before || JSON.stringify(draftValues(draft.entity, current)) !== JSON.stringify(draftValues(draft.entity, draft.before))) return false
+    if (draft.entity === 'subscriptions' && !draft.after && [...this.profiles.values()].some((p) => p.subscriptionIds.includes(draft.entityId))) return false
+    if (draft.entity === 'profiles' && draft.after && (draft.after as Profile).subscriptionIds.some((id) => !this.subs.has(id))) return false
+    if (draft.sources?.some((source) => JSON.stringify(draftValues('subscriptions', this.subs.get(source.id) ?? null)) !== JSON.stringify(draftValues('subscriptions', source)))) return false
+    if (draft.after) map.set(draft.entityId, structuredClone(draft.after))
+    else map.delete(draft.entityId)
+    if (version) this.versions.set(version.id, structuredClone(version))
+    this.drafts.delete(draft.id)
+    return true
+  }
 
   async listSubscriptions(): Promise<Subscription[]> {
     return [...this.subs.values()].sort((a, b) => a.createdAt - b.createdAt)
@@ -22,7 +51,14 @@ export class InMemoryStorage implements Storage {
   async upsertSubscription(sub: Subscription) {
     this.subs.set(sub.id, sub)
   }
+  async replaceSubscription(expected: Subscription, next: Subscription) {
+    const current = this.subs.get(expected.id)
+    if (!current || JSON.stringify(draftValues('subscriptions', current)) !== JSON.stringify(draftValues('subscriptions', expected))) return false
+    this.subs.set(expected.id, structuredClone(next))
+    return true
+  }
   async deleteSubscription(id: string) {
+    if ([...this.profiles.values()].some(p => p.subscriptionIds.includes(id))) throw new Error(`Subscription is referenced: ${id}`)
     this.subs.delete(id)
   }
 
@@ -37,6 +73,14 @@ export class InMemoryStorage implements Storage {
   }
   async upsertProfile(p: Profile) {
     this.profiles.set(p.id, p)
+  }
+  async replaceProfile(expected: Profile, next: Profile, version?: Version) {
+    const current = this.profiles.get(expected.id)
+    if (!current || JSON.stringify(draftValues('profiles', current)) !== JSON.stringify(draftValues('profiles', expected))) return false
+    if (next.subscriptionIds.some(id => !this.subs.has(id))) return false
+    this.profiles.set(expected.id, structuredClone(next))
+    if (version) this.versions.set(version.id, structuredClone(version))
+    return true
   }
   async deleteProfile(id: string) {
     this.profiles.delete(id)

@@ -20,21 +20,19 @@ describe('parseUserInfo', () => {
 })
 
 describe('tcpPing / checkNodes', () => {
-  it('可连通端口返回延迟，关闭端口返回 null', async () => {
+  it('即使本机端口可连接，也拒绝测活内网目标', async () => {
     const server = net.createServer()
     await new Promise<void>((res) => server.listen(0, '127.0.0.1', res))
     const port = (server.address() as net.AddressInfo).port
 
     const ok = await tcpPing('127.0.0.1', port, 1000)
-    expect(typeof ok).toBe('number')
-    expect(ok).toBeGreaterThanOrEqual(0)
-
     await new Promise<void>((res) => server.close(() => res()))
+    expect(ok).toBeNull()
     const dead = await tcpPing('127.0.0.1', port, 500)
     expect(dead).toBeNull()
   })
 
-  it('checkNodes 汇总存活情况', async () => {
+  it('checkNodes 保留被地址策略拒绝的节点结果与顺序', async () => {
     const server = net.createServer()
     await new Promise<void>((res) => server.listen(0, '127.0.0.1', res))
     const port = (server.address() as net.AddressInfo).port
@@ -43,8 +41,7 @@ describe('tcpPing / checkNodes', () => {
       makeNode({ name: 'dead', type: 'trojan', server: '127.0.0.1', port: 1 }),
     ]
     const results = await checkNodes(nodes, 4, 800)
-    expect(results.find((r) => r.name === 'alive')!.latency).not.toBeNull()
-    expect(results.find((r) => r.name === 'dead')!.latency).toBeNull()
     await new Promise<void>((res) => server.close(() => res()))
+    expect(results.map((r) => [r.name, r.latency])).toEqual([['alive', null], ['dead', null]])
   })
 })

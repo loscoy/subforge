@@ -32,6 +32,11 @@ export interface Transport {
   serviceName?: string
   /** 额外 ws headers */
   wsHeaders?: Record<string, string>
+  /** HTTP 伪装保留多值字段 */
+  httpMethod?: string
+  httpPaths?: string[]
+  httpHeaders?: Record<string, string[]>
+  httpHosts?: string[]
 }
 
 /** TLS / Reality 相关配置。 */

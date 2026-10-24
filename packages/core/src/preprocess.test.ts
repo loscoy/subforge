@@ -62,6 +62,31 @@ describe('expandRegionGroups', () => {
 })
 
 describe('模板 + 管线端到端', () => {
+  it('自动地区组只发现指定来源地区，同地区也不能混入其它来源', async () => {
+    const output = await runPipeline({
+      rawSubscriptions: ['trojan://p@a.com:443#HK-A', 'trojan://p@b.com:443#HK-B\ntrojan://p@c.com:443#JP-B'],
+      sourceIds: ['a', 'b'], target: 'mihomo',
+      profile: { groups: [{ name: 'regions', type: 'url-test', autoRegion: true, sourceIds: ['a'] }], rules: [] },
+    })
+    const yaml = await import('js-yaml')
+    expect((yaml.load(output.config) as any)['proxy-groups']).toMatchObject([{ name: '🇭🇰 HK', proxies: ['HK-A'] }])
+    expect((yaml.load(output.config) as any)['proxy-groups']).toHaveLength(1)
+  })
+
+  it('同名节点按来源过滤、加前缀与分组，JSON 导出保留来源', async () => {
+    const input = {
+      rawSubscriptions: ['trojan://p@a.com:443#same', 'trojan://p@b.com:443#same'],
+      sourceIds: ['a', 'b'], target: 'mihomo',
+      profile: { groups: [{ name: 'only-b', type: 'select' as const, sourceIds: ['b'] }], rules: [], operations: [{ op: 'prefixSource' as const, sourceId: 'b', prefix: 'B-' }] },
+    }
+    const yaml = await import('js-yaml')
+    const out = await runPipeline(input)
+    expect((yaml.load(out.config) as any)['proxy-groups'][0].proxies).toEqual(['B-same'])
+    const filtered = await runPipeline({ ...input, target: 'node-json', profile: { ...input.profile, operations: [...input.profile.operations, { op: 'keepSource', sourceIds: ['b'] }] } })
+    expect(JSON.parse(filtered.config)).toMatchObject([{ name: 'B-same', server: 'b.com', meta: { source: 'b' } }])
+    expect(filtered.nodes).toHaveLength(1)
+  })
+
   it('标准模板：operations + 地区分组 + 规则 都生效', async () => {
     // 第 1、3 条完全相同 → 会被 dedupe
     const raw = ['trojan://p1@a.com:1#🇭🇰 HK 01', 'trojan://p2@b.com:2#🇺🇸 US 01', 'trojan://p1@a.com:1#🇭🇰 HK 01'].join('\n')

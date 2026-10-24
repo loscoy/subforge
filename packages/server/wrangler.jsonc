@@ -4,6 +4,8 @@
   "main": "src/worker.ts",
   "compatibility_date": "2025-01-15",
   "compatibility_flags": ["nodejs_compat"],
+  // 仅刷新用户在订阅设置里显式启用的来源；默认所有来源关闭。
+  "triggers": { "crons": ["*/5 * * * *"] },
   // 前端静态资源（构建后的 SPA）；动态端点交给 Worker 处理
   "assets": {
     "directory": "../web/dist",

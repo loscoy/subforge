@@ -59,12 +59,12 @@ export function AgentDock({
   profile,
   hasAgent,
   onClose,
-  onChanged,
+  onDraftsChanged,
 }: {
   profile: { id: string; name: string } | null
   hasAgent: boolean
   onClose: () => void
-  onChanged: () => void
+  onDraftsChanged: () => void
 }) {
   // width 存的是「用户想要的宽度」，渲染时才按当前视口收窄。
   // 若直接把收窄结果写回 state，窗口变窄一次就再也回不去了。
@@ -410,7 +410,7 @@ export function AgentDock({
               ensureSession={ensureSession}
               onActivity={bumpSession}
               hasAgent={hasAgent}
-              onChanged={onChanged}
+              onDraftsChanged={onDraftsChanged}
               context={
                 profile
                   ? `用户正在编辑配置：id=${profile.id}，name=「${profile.name}」。除非明确指定其它档，所有 read/write/preview/validate/save_template/apply_template 操作都针对这个档（profileId=${profile.id}）。`

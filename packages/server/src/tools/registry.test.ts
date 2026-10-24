@@ -4,11 +4,17 @@ import { InMemoryStorage } from '../storage/index.js'
 import { newId, newToken, now } from '../util.js'
 import type { Profile, Subscription } from '../storage/index.js'
 import { buildTools, type Tool, type ToolContext } from './registry.js'
+import { applyDraft } from '../drafts.js'
 
+/** 既有业务测试模拟用户审批；草稿隔离与拒绝逻辑另测原始 registry。 */
 function tool(name: string): Tool {
   const t = buildTools().find((x) => x.name === name)
   if (!t) throw new Error(`no tool ${name}`)
-  return t
+  return { ...t, async handler(input, ctx) {
+    const result = await t.handler(input, ctx) as { draftId?: string }
+    if (result.draftId) await applyDraft(ctx.storage, result.draftId)
+    return result
+  } }
 }
 
 const SUB_CONTENT = [
@@ -347,7 +353,8 @@ describe('tool registry 集成', () => {
   })
 
   it('refresh_subscription 拒绝私网 URL（SSRF）', async () => {
-    const s: any = await tool('create_subscription').handler({ name: 'evil', url: 'http://127.0.0.1/sub' }, ctx)
+    const s = { id: 'legacy-private-source', name: 'evil', url: 'http://127.0.0.1/sub', createdAt: 1, updatedAt: 1 }
+    await ctx.storage.upsertSubscription(s)
     const r: any = await tool('refresh_subscription').handler({ subscriptionId: s.id }, ctx)
     expect(r.ok).toBe(false)
     expect(r.error).toBeTruthy()

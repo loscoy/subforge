@@ -20,11 +20,12 @@ const SUPPORTED: ReadonlySet<string> = new Set([
  * 解析 Clash/Mihomo YAML 订阅：取顶层 `proxies:` 列表，逐个转为统一节点。
  * 不是 Clash YAML、或没有 proxies 时返回 []。
  */
-export function parseClashYaml(raw: string): ProxyNode[] {
+export function parseClashYaml(raw: string, diagnostics: string[] = []): ProxyNode[] {
   let doc: unknown
   try {
     doc = yaml.load(raw)
   } catch {
+    diagnostics.push('Invalid Clash YAML')
     return []
   }
   if (!doc || typeof doc !== 'object') return []
@@ -32,9 +33,10 @@ export function parseClashYaml(raw: string): ProxyNode[] {
   if (!Array.isArray(proxies)) return []
 
   const nodes: ProxyNode[] = []
-  for (const p of proxies) {
+  for (const [index, p] of proxies.entries()) {
     const node = clashProxyToNode(p as Record<string, unknown>)
     if (node) nodes.push(node)
+    else diagnostics.push(`Clash proxy ${index + 1}: ${p && !SUPPORTED.has(String(p.type ?? '')) ? 'unsupported protocol' : 'invalid node'}`)
   }
   return nodes
 }
@@ -50,12 +52,13 @@ function numOrUndefined(v: unknown): number | undefined {
 
 /** 单个 Clash proxy 对象 → ProxyNode，不支持的类型返回 null。 */
 export function clashProxyToNode(p: Record<string, unknown>): ProxyNode | null {
+  if (!p || typeof p !== 'object') return null
   const type = String(p.type ?? '')
   if (!SUPPORTED.has(type)) return null
   const server = p.server != null ? String(p.server) : ''
   const port = Number(p.port)
   const name = p.name != null ? String(p.name) : `${server}:${port}`
-  if (!server || !port) return null
+  if (!server || !Number.isInteger(port) || port < 1 || port > 65535) return null
 
   const str = (k: string) => (p[k] == null ? undefined : String(p[k]))
   const bool = (k: string) => p[k] === true || p[k] === 'true'
@@ -165,16 +168,30 @@ export function clashProxyToNode(p: Record<string, unknown>): ProxyNode | null {
     const ws = p['ws-opts'] as Record<string, unknown> | undefined
     const grpc = p['grpc-opts'] as Record<string, unknown> | undefined
     const h2 = p['h2-opts'] as Record<string, unknown> | undefined
+    const http = p['http-opts'] as Record<string, unknown> | undefined
     if (network === 'ws' && ws) {
       t.path = ws.path != null ? String(ws.path) : undefined
       const headers = ws.headers as Record<string, unknown> | undefined
       if (headers && headers.Host != null) t.host = String(headers.Host)
+      if (headers) t.wsHeaders = Object.fromEntries(Object.entries(headers).map(([k, v]) => [k, String(v)]))
+      if (ws['v2ray-http-upgrade'] === true) t.network = 'httpupgrade'
     } else if (network === 'grpc' && grpc) {
       t.serviceName = grpc['grpc-service-name'] != null ? String(grpc['grpc-service-name']) : undefined
-    } else if ((network === 'h2' || network === 'http') && h2) {
+    } else if (network === 'http' && http) {
+      t.httpMethod = http.method == null ? undefined : String(http.method)
+      t.httpPaths = Array.isArray(http.path) ? http.path.map(String) : http.path == null ? undefined : [String(http.path)]
+      t.path = t.httpPaths?.[0]
+      if (http.headers && typeof http.headers === 'object') {
+        t.httpHeaders = Object.fromEntries(Object.entries(http.headers).map(([k, v]) => [k, Array.isArray(v) ? v.map(String) : [String(v)]]))
+        t.host = (t.httpHeaders.Host ?? t.httpHeaders.host)?.[0]
+      }
+    } else if (network === 'h2' && h2) {
       t.path = h2.path != null ? String(h2.path) : undefined
       const host = h2.host
-      if (Array.isArray(host) && host.length) t.host = String(host[0])
+      if (Array.isArray(host) && host.length) {
+        t.httpHosts = host.map(String)
+        t.host = String(host[0])
+      }
     }
     node.transport = t
   }

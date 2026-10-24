@@ -25,6 +25,24 @@ describe('HTTP app', () => {
     expect(res.status).toBe(200)
   })
 
+  it('分享轮换、禁用、重新启用；公开端点不能强制刷新；引用源不能删除', async () => {
+    const request = (path: string, method = 'GET', body?: unknown) => app.request(path, { method, headers: { 'content-type': 'application/json' }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) })
+    const sub = await json(await request('/api/subscriptions', 'POST', { name: 's', content: SUB }))
+    const p = await json(await request('/api/profiles', 'POST', { name: 'p', subscriptionIds: [sub.id] }))
+    expect((await request(`/api/subscriptions/${sub.id}`, 'DELETE')).status).toBe(409)
+    expect((await request(`/sub/${p.token}?force=1`)).status).toBe(403)
+    const rotated = await json(await request(`/api/profiles/${p.id}/share`, 'POST', { action: 'rotate' }))
+    expect(rotated.token).not.toBe(p.token)
+    expect((await request(`/sub/${p.token}`)).status).toBe(404)
+    expect((await request(`/sub/${rotated.token}`)).status).toBe(200)
+    await request(`/api/profiles/${p.id}/share`, 'POST', { action: 'disable' })
+    expect((await request(`/sub/${rotated.token}`)).status).toBe(404)
+    const enabled = await json(await request(`/api/profiles/${p.id}/share`, 'POST', { action: 'enable' }))
+    expect(enabled.token).not.toBe(rotated.token)
+    expect((await request(`/sub/${rotated.token}`)).status).toBe(404)
+    expect((await request(`/sub/${enabled.token}`)).status).toBe(200)
+  })
+
   it('全流程：建订阅 → 建配置 → /sub/:token 输出可用配置', async () => {
     const subRes = await app.fetch(
       new Request('http://x/api/subscriptions', {

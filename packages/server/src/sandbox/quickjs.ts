@@ -104,7 +104,41 @@ export class QuickJsRunner implements ScriptRunner {
     error: (...a) => __log('error', JSON.stringify(a)),
   };
   const utils = new Proxy({}, { get: (_t, p) => (...args) => JSON.parse(__util(String(p), JSON.stringify(args))) });
-  const __run = async () => { ${code}\n };
+  const $arguments = params;
+  const __run = async () => { ${code}\n
+    if (typeof operator === 'function' || typeof filter === 'function') {
+      if (typeof operator === 'function' && typeof filter === 'function') throw new Error('Define only one operator or filter');
+      console.warn('有限 Sub-Store 兼容：仅支持 name/server/port/type 公共字段；不可新增节点或修改协议，不提供平台工具、网络或文件系统。');
+      const origin = Symbol('source');
+      const fields = ['name', 'server', 'port', 'type'];
+      const proxies = nodes.map((node, i) => new Proxy({ name: node.name, server: node.server, port: node.port, type: node.type, [origin]: i }, {
+        get: (obj, key) => {
+          if (typeof key === 'string' && !fields.includes(key)) throw new Error('Unsupported Sub-Store field: ' + key);
+          return obj[key];
+        },
+        set: (obj, key, value) => {
+          if (!fields.includes(key)) throw new Error('Unsupported Sub-Store field: ' + String(key));
+          obj[key] = value; return true;
+        },
+      }));
+      const context = new Proxy({}, { get: (_obj, key) => { throw new Error('Unsupported Sub-Store context: ' + String(key)); } });
+      let selected;
+      if (typeof filter === 'function') {
+        const flags = await filter(proxies, 'SubForge', context);
+        if (!Array.isArray(flags) || flags.length !== nodes.length || flags.some(v => typeof v !== 'boolean')) throw new Error('filter must return one boolean per input node');
+        selected = proxies.filter((_p, i) => flags[i]);
+      } else selected = await operator(proxies, 'SubForge', context);
+      if (!Array.isArray(selected)) throw new Error('operator must return an array');
+      return selected.map(p => {
+        const original = nodes[p?.[origin]];
+        if (!original) throw new Error('Creating nodes is outside the supported Sub-Store subset');
+        if (Object.keys(p).some(key => !fields.includes(key))) throw new Error('Unsupported Sub-Store output fields');
+        if (p.type !== original.type) throw new Error('Changing protocols is outside the supported Sub-Store subset');
+        if (typeof p.name !== 'string' || typeof p.server !== 'string' || !p.server || !Number.isInteger(p.port) || p.port < 1 || p.port > 65535) throw new Error('Invalid Sub-Store output node');
+        return { ...original, name: p.name, server: p.server, port: p.port };
+      });
+    }
+  };
   const out = await __run();
   return JSON.stringify(Array.isArray(out) ? out : nodes);
 })()`

@@ -100,7 +100,7 @@ export function parseUri(uri: string): ProxyNode | null {
  * 解析一份订阅内容：可能是整体 base64、Clash YAML、或每行（甚至空格分隔）一个 URI。
  * 返回所有成功解析的节点。
  */
-export function parseSubscription(raw: string): ProxyNode[] {
+export function parseSubscription(raw: string, diagnostics: string[] = []): ProxyNode[] {
   let text = raw.trim()
   if (!text) return []
 
@@ -113,14 +113,18 @@ export function parseSubscription(raw: string): ProxyNode[] {
 
   // Clash/Mihomo YAML 订阅（机场常见 ?clash 返回此格式）
   if (CLASH_PROXIES_RE.test(text)) {
-    const nodes = parseClashYaml(text)
-    if (nodes.length) return nodes
+    return parseClashYaml(text, diagnostics)
   }
 
   const nodes: ProxyNode[] = []
-  for (const token of splitNodeTokens(text)) {
+  for (const [index, token] of splitNodeTokens(text).entries()) {
     const node = parseUri(token)
     if (node) nodes.push(node)
+    else {
+      const scheme = splitScheme(token)?.scheme
+      const unsupported = scheme && !(SCHEMES as readonly string[]).includes(scheme)
+      diagnostics.push(`Input item ${index + 1}: ${unsupported ? 'unsupported protocol' : 'malformed URI'}`)
+    }
   }
   return nodes
 }

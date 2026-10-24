@@ -13,6 +13,8 @@ export interface Subscription {
   fetchedAt?: number
   /** 机场返回的流量/到期信息（subscription-userinfo 头） */
   userInfo?: UserInfo
+  /** 每源抓取与缓存策略；失败始终保留最后有效内容并显式报错。 */
+  fetchPolicy?: { userAgent?: string; maxAgeMinutes?: number; autoRefresh?: boolean; intervalMinutes?: number; failureThreshold?: number; dropPercent?: number }
   createdAt: number
   updatedAt: number
 }
@@ -34,6 +36,7 @@ export interface Profile {
   profile: ConversionProfile
   /** 分享 token（出口 /sub/:token） */
   token: string
+  shareDisabled?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -115,15 +118,48 @@ export interface LoginThrottle {
   lockedUntil: number
 }
 
+export type DraftEntity = 'profiles' | 'subscriptions' | 'templates'
+export interface RefreshState {
+  source: string
+  lastAttempt: number
+  leaseUntil: number
+  failures: number
+  alerts: string[]
+  history: { at: number; ok: boolean; error?: string; delta?: import('@subforge/core').NodeDelta }[]
+}
+export interface ChangeDraft {
+  id: string
+  tool: string
+  entity: DraftEntity
+  entityId: string
+  before: Profile | Subscription | StoredTemplate | null
+  after: Profile | Subscription | StoredTemplate | null
+  createdAt: number
+  validation: { ok: boolean; error?: string; warnings: string[]; stages?: import('@subforge/core').PipelineStage[] }
+  sources?: Subscription[]
+  diff: { field: string; before: unknown; after: unknown }[]
+}
+
 /**
  * Storage 抽象（异步）：Node 用 sqlite、测试用内存、serverless 用 D1/KV。
  * 全部方法返回 Promise，以兼容 Cloudflare D1/KV 这类异步存储。
  */
 export interface Storage {
+  getRefreshState(id: string): Promise<RefreshState | undefined>
+  compareRefreshState(id: string, expected: RefreshState | undefined, next: RefreshState): Promise<boolean>
+
+  // 草稿保存在 kv 独立键；应用时必须原子校验旧实体并写入新值及版本。
+  listDrafts(): Promise<ChangeDraft[]>
+  getDraft(id: string): Promise<ChangeDraft | undefined>
+  putDraft(draft: ChangeDraft): Promise<void>
+  deleteDraft(id: string): Promise<void>
+  applyDraftChange(draft: ChangeDraft, version?: Version): Promise<boolean>
+
   // 订阅
   listSubscriptions(): Promise<Subscription[]>
   getSubscription(id: string): Promise<Subscription | undefined>
   upsertSubscription(sub: Subscription): Promise<void>
+  replaceSubscription(expected: Subscription, next: Subscription): Promise<boolean>
   deleteSubscription(id: string): Promise<void>
 
   // 配置
@@ -131,6 +167,8 @@ export interface Storage {
   getProfile(id: string): Promise<Profile | undefined>
   getProfileByToken(token: string): Promise<Profile | undefined>
   upsertProfile(p: Profile): Promise<void>
+  /** 原子比较完整旧值、验证来源引用、写入配置及可选版本；冲突不产生版本。 */
+  replaceProfile(expected: Profile, next: Profile, version?: Version): Promise<boolean>
   deleteProfile(id: string): Promise<void>
 
   // 版本历史

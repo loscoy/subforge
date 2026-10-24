@@ -2,6 +2,7 @@ import type { RenderContext } from '../config.js'
 import { renderMihomo } from './mihomo.js'
 import { renderSingbox } from './singbox.js'
 import { renderSurge } from './surge.js'
+import { renderUri } from './uri.js'
 
 /**
  * 渲染器接口：把统一节点 + 配置档产出目标客户端格式文本。
@@ -39,6 +40,11 @@ const registry = new Map<string, Renderer>([
   [singbox.id, singbox],
   ['sing-box', singbox], // 别名
   [surge.id, surge],
+  ['uri', { id: 'uri', contentType: 'text/plain; charset=utf-8', render: renderUri }],
+  ['node-json', { id: 'node-json', contentType: 'application/json; charset=utf-8', render: ({ nodes, warnings }) => {
+    warnings?.push('节点 JSON 为 SubForge 节点模型，含来源与连接凭据，不包含分组、规则、DNS 或 TUN。')
+    return JSON.stringify(nodes, null, 2)
+  } }],
 ])
 
 export function getRenderer(id: string): Renderer | undefined {

@@ -4,15 +4,20 @@ import type { Profile, Storage, Subscription } from '../storage/index.js'
 import {
   buildProfileOutput,
   collectRawSubscriptions,
+  deleteSubscription,
+  updateSubscription,
+  getSubscriptionRefreshStatus,
+  subscriptionFetchPolicySchema,
   ensureSubscriptionContent,
   newDefaultProfile,
   previewScript,
   rollbackProfile,
   saveProfileWithVersion,
 } from '../service.js'
-import { getRenderer, listRenderers, parseSubscription } from '@subforge/core'
+import { explainDomainRoute, getRenderer, isOverrideScript, listRenderers, parseSubscription } from '@subforge/core'
 import type { NodeChecker } from '../health.js'
 import { contentRev, newId, newToken, now } from '../util.js'
+import { DRAFT_TOOLS, proposeToolChange } from '../drafts.js'
 
 /**
  * 「整份替换」类写操作的统一前置条件：**没读过当前内容就不准覆盖**。
@@ -68,17 +73,49 @@ export interface ToolContext {
 export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
   const tools: Tool[] = [
     {
+      name: 'list_drafts',
+      description: '列出待用户审批的变更草稿。草稿尚未生效，只有产品用户能在界面应用。',
+      schema: z.object({}),
+      async handler(_input, { storage }) {
+        return (await storage.listDrafts()).map(({ id, tool, entity, entityId, validation }) => ({ id, tool, entity, entityId, validation, applied: false }))
+      },
+    },
+    {
+      name: 'diagnose_profile',
+      description: '确定性诊断节点丢失：返回解析、每条操作、脚本和目标过滤阶段的增删及原因。不能据此断言节点连接可用。',
+      schema: z.object({ profileId: z.string() }),
+      async handler({ profileId }, { storage, runner }) {
+        const p = await storage.getProfile(profileId)
+        if (!p) throw new Error('Profile not found')
+        const result = await previewScript(storage, runner, p, p.script || '')
+        return { ok: result.ok, error: result.error, stages: result.stages, warnings: result.warnings, limitation: '静态管线验证，不代表客户端连接验证；节点属性修改显示为旧项移除、新项加入。' }
+      },
+    },
+    {
+      name: 'explain_route',
+      description: '根据内联规则顺序解释域名分流；远程规则集、DNS、IP、脚本覆写和客户端运行时条件返回不确定，不猜测。',
+      schema: z.object({ profileId: z.string(), domain: z.string() }),
+      async handler({ profileId, domain }, { storage }) {
+        const p = await storage.getProfile(profileId)
+        if (!p) throw new Error('Profile not found')
+        if (p.script && isOverrideScript(p.script)) return { certainty: 'uncertain', reason: '覆写脚本控制最终规则；表单规则未生效，需检查生成结果与客户端运行时。' }
+        return explainDomainRoute(p.profile.rules, domain)
+      },
+    },
+    {
       name: 'list_subscriptions',
       description: '列出所有订阅源（id、名称、url、节点数缓存状态）。',
       schema: z.object({}),
       async handler(_i, { storage }) {
-        return (await storage.listSubscriptions()).map((s) => ({
+        return Promise.all((await storage.listSubscriptions()).map(async (s) => ({
           id: s.id,
           name: s.name,
           url: s.url,
           hasContent: !!s.content,
           fetchedAt: s.fetchedAt,
-        }))
+          fetchPolicy: s.fetchPolicy,
+          refreshStatus: await getSubscriptionRefreshStatus(storage, s),
+        })))
       },
     },
     {
@@ -89,14 +126,16 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
         name: z.string(),
         url: z.string().optional(),
         content: z.string().optional(),
+        fetchPolicy: subscriptionFetchPolicySchema,
       }),
-      async handler({ name, url, content }, { storage }) {
+      async handler({ name, url, content, fetchPolicy }, { storage }) {
         if (!url && !content) throw new Error('url 与 content 至少提供其一')
         const sub: Subscription = {
           id: newId(),
           name: name || '未命名订阅',
           url,
           content,
+          fetchPolicy,
           createdAt: now(),
           updatedAt: now(),
         }
@@ -139,9 +178,10 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
         name: z.string().optional(),
         url: z.string().optional(),
         content: z.string().optional(),
+        fetchPolicy: subscriptionFetchPolicySchema,
         baseRev: z.string().optional().describe('get_subscription(includeContent=true) 返回的 contentRev；覆盖已有 content 时必填'),
       }),
-      async handler({ subscriptionId, name, url, content, baseRev }, { storage }) {
+      async handler({ subscriptionId, name, url, content, fetchPolicy, baseRev }, { storage }) {
         const cur = await storage.getSubscription(subscriptionId)
         if (!cur) throw new Error('订阅不存在')
         // 订阅内容没有快照可回滚，是全仓最不能覆盖错的东西
@@ -153,14 +193,7 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
             '调 get_subscription 并传 includeContent=true 取 contentRev',
           )
         }
-        const next: Subscription = {
-          ...cur,
-          ...(name !== undefined ? { name } : {}),
-          ...(url !== undefined ? { url } : {}),
-          ...(content !== undefined ? { content } : {}),
-          updatedAt: now(),
-        }
-        await storage.upsertSubscription(next)
+        await updateSubscription(storage, cur, { name, url, content, fetchPolicy })
         return { ok: true }
       },
     },
@@ -196,13 +229,7 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
       async handler({ subscriptionId }, { storage }) {
         const cur = await storage.getSubscription(subscriptionId)
         if (!cur) throw new Error('订阅不存在')
-        const used = (await storage.listProfiles()).filter((p) => p.subscriptionIds.includes(subscriptionId))
-        if (used.length) {
-          throw new Error(
-            `订阅仍被 ${used.length} 个配置引用：${used.map((p) => p.name).join('、')}。请先解除关联再删除。`,
-          )
-        }
-        await storage.deleteSubscription(subscriptionId)
+        await deleteSubscription(storage, subscriptionId)
         return { ok: true }
       },
     },
@@ -312,7 +339,7 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
           ...(target !== undefined ? { target } : {}),
           ...(subscriptionIds !== undefined ? { subscriptionIds } : {}),
         }
-        await saveProfileWithVersion(storage, next, note ?? 'agent 修改配置元信息')
+        await saveProfileWithVersion(storage, p, next, note ?? 'agent 修改配置元信息')
         return { ok: true, name: next.name, target: next.target, subscriptionIds: next.subscriptionIds }
       },
     },
@@ -426,7 +453,7 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
           next = next.replace(oldText, () => newText)
         })
 
-        await saveProfileWithVersion(storage, { ...p, script: next }, note ?? 'agent 局部修改脚本')
+        await saveProfileWithVersion(storage, p, { ...p, script: next }, note ?? 'agent 局部修改脚本')
         return {
           ok: true,
           edits: edits.length,
@@ -455,7 +482,7 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
         const prev = p.script ?? ''
         // 空脚本 = 还没有东西可丢，等同「新建文件」，不要求先读
         if (prev) assertFresh('该配置的转换脚本', contentRev(prev), baseRev, '调 get_profile 取 scriptRev')
-        await saveProfileWithVersion(storage, { ...p, script }, note ?? 'agent 修改脚本')
+        await saveProfileWithVersion(storage, p, { ...p, script }, note ?? 'agent 修改脚本')
         return { ok: true, bytesBefore: prev.length, bytesAfter: script.length, scriptRev: contentRev(script) }
       },
     },
@@ -484,8 +511,40 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
           ...(rules ? { rules } : {}),
           ...(ruleProviders ? { ruleProviders } : {}),
         }
-        await saveProfileWithVersion(storage, { ...p, profile: nextProfile }, note ?? 'agent 修改配置')
+        await saveProfileWithVersion(storage, p, { ...p, profile: nextProfile }, note ?? 'agent 修改配置')
         return { ok: true, groups: nextProfile.groups.map((g: any) => g.name), ruleCount: nextProfile.rules.length }
+      },
+    },
+    {
+      name: 'patch_config',
+      description: '受约束局部修改配置的一项：rules/groups/operations 用 index，dns/tun 用 key。replace/remove 必须提供与当前值完全一致的 expected；insert 以 expected 校验插入位置（末尾为 null）。其它字段保留。只生成待审批草稿。',
+      schema: z.object({
+        profileId: z.string(), section: z.enum(['rules', 'groups', 'operations', 'dns', 'tun']),
+        action: z.enum(['insert', 'replace', 'remove']), index: z.number().int().min(0).optional(),
+        key: z.string().regex(/^[a-zA-Z0-9_-]+$/).optional(), expected: z.unknown(), value: z.unknown().optional(),
+      }),
+      async handler({ profileId, section, action, index, key, expected, value }, { storage }) {
+        const p = await storage.getProfile(profileId)
+        if (!p) throw new Error('Profile not found')
+        const next = structuredClone(p)
+        if (section === 'dns' || section === 'tun') {
+          if (!key || ['__proto__', 'constructor', 'prototype'].includes(key)) throw new Error('Invalid configuration key')
+          const settings = { ...((p.profile.extraConfig?.[section] as Record<string, unknown>) || {}) }
+          if (JSON.stringify(settings[key] ?? null) !== JSON.stringify(expected)) throw new Error('Expected value does not match current configuration')
+          if (action === 'insert' && key in settings) throw new Error('Configuration key already exists')
+          if (action === 'remove') delete settings[key]
+          else settings[key] = value
+          next.profile.extraConfig = { ...p.profile.extraConfig, [section]: settings }
+        } else {
+          const list: unknown[] = [...(p.profile[section as 'rules' | 'groups' | 'operations'] || [])]
+          if (index === undefined || index > list.length || (action !== 'insert' && index === list.length)) throw new Error('Invalid configuration index')
+          if (JSON.stringify(list[index] ?? null) !== JSON.stringify(expected)) throw new Error('Expected value does not match current configuration')
+          if (section === 'rules' && action !== 'remove' && typeof value !== 'string') throw new Error('Rule must be a string')
+          list.splice(index, action === 'insert' ? 0 : 1, ...(action === 'remove' ? [] : [value]))
+          Object.assign(next.profile, { [section]: list })
+        }
+        await saveProfileWithVersion(storage, p, next, 'agent 局部修改配置')
+        return { ok: true }
       },
     },
     {
@@ -577,7 +636,7 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
         if (!t) throw new Error('模板不存在')
         const p = await storage.getProfile(profileId)
         if (!p) throw new Error('配置不存在')
-        await saveProfileWithVersion(storage, { ...p, profile: t.profile, script: t.script }, `套用模板「${t.name}」`)
+        await saveProfileWithVersion(storage, p, { ...p, profile: t.profile, script: t.script }, `套用模板「${t.name}」`)
         return { ok: true }
       },
     },
@@ -639,5 +698,9 @@ export function buildTools(caps?: { checkNodes?: boolean }): Tool[] {
     },
   ]
   // 边缘运行时无测活能力（node:net 不可用）→ 不暴露 test_nodes，避免模型调用必然失败的工具。
-  return caps?.checkNodes === false ? tools.filter((t) => t.name !== 'test_nodes') : tools
+  return tools.filter((t) => caps?.checkNodes !== false || t.name !== 'test_nodes').map((t) => DRAFT_TOOLS.has(t.name) ? {
+    ...t,
+    description: `【仅生成草稿，不立即生效】用户必须在界面检查差异与验证结果后应用；模型不能代替用户应用。\n${t.description}`,
+    handler: (input, ctx) => proposeToolChange(t, input, ctx),
+  } : t)
 }

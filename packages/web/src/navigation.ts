@@ -1,4 +1,4 @@
-export const VIEWS = ['subs', 'profiles', 'mcp', 'settings'] as const
+export const VIEWS = ['subs', 'profiles', 'drafts', 'mcp', 'settings'] as const
 
 export type View = (typeof VIEWS)[number]
 

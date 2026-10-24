@@ -4,6 +4,8 @@ import { QuickJsRunner } from '../sandbox/quickjs.js'
 import { SqliteStorage } from '../storage/index.js'
 import { createMcpServer } from './server.js'
 import { getConfig } from '../config.js'
+import { publicSubscriptionFetch } from '../nodeNetwork.js'
+import { setSubscriptionFetcher } from '../service.js'
 
 /**
  * 以 stdio 方式运行 MCP server —— 供 Claude Code / Claude Desktop 等 MCP 客户端连接，
@@ -15,6 +17,7 @@ import { getConfig } from '../config.js'
 async function main() {
   const cfg = getConfig()
   const storage = new SqliteStorage(cfg.dbPath)
+  setSubscriptionFetcher(storage, publicSubscriptionFetch)
   const runner = new QuickJsRunner()
   const server = createMcpServer({ storage, runner, checkNodes })
   const transport = new StdioServerTransport()

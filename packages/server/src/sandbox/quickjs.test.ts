@@ -11,6 +11,22 @@ const nodes: ProxyNode[] = [
 describe('QuickJsRunner（wasm 沙箱）', () => {
   const runner = new QuickJsRunner()
 
+  it('有限 operator/filter 保留凭据与来源，拒绝不支持字段和错误掩码', async () => {
+    const input = nodes.map((n, i) => ({ ...n, password: `secret-${i}`, meta: { source: `source-${i}` } }))
+    const changed = await runner.run(`async function operator(proxies) { return proxies.slice(1).reverse().map(p => ({ ...p, name: $arguments.prefix + p.name })); }`, input, { prefix: 'X-' })
+    expect(changed.ok).toBe(true)
+    expect(changed.nodes).toEqual([2, 1].map(i => ({ ...input[i], name: 'X-' + input[i]!.name })))
+    const filtered = await runner.run(`function filter(proxies) { return proxies.map(p => p.name.includes('HK')); }`, input)
+    expect(filtered.ok).toBe(true)
+    expect(filtered.nodes).toEqual([input[0]])
+    for (const code of [
+      `function filter(proxies) { return [true]; }`,
+      `function operator(proxies) { proxies[0].password = 'x'; return proxies; }`,
+      `function operator(proxies) { return proxies.filter(p => p['ws-opts']); }`,
+      `function operator(proxies) { require('fs'); return proxies; }`,
+    ]) expect((await runner.run(code, input)).ok).toBe(false)
+  })
+
   it('return 过滤后的节点', async () => {
     const r = await runner.run(`return utils.keep(nodes, 'US')`, nodes)
     expect(r.ok).toBe(true)

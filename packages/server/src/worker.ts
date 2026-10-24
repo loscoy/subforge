@@ -6,6 +6,7 @@ import type { ServerConfig } from './config.js'
 import { createApp } from './routes/app.js'
 import { QuickJsRunner } from './sandbox/quickjs.js'
 import { D1Storage } from './storage/d1.js'
+import { refreshDueSubscriptions } from './service.js'
 // vendored 到 worker 包内（prebuild 从 node_modules 拷贝）——保证在 worker root 内，
 // 让 wrangler 以 CompiledWasm 模块加载；再经 newVariant 注入，避免运行时字节编译。
 import quickjsWasm from './quickjs.wasm'
@@ -30,12 +31,20 @@ export interface Env {
 }
 
 // 模块作用域：同一 isolate 内跨请求复用，QuickJS WASM 模块只实例化一次（首个请求后显著变快）。
-// 只依赖 edgeQuickJs（无 env），可安全提升；storage 依赖 env.DB 故仍按请求创建。
+// 按 DB 绑定复用存储实例，使刷新请求合并在同一 isolate 内跨请求生效。
 const runner = new QuickJsRunner(edgeQuickJs)
+const stores = new WeakMap<D1Database, D1Storage>()
 
 export default {
+  async scheduled(_event: unknown, env: Env): Promise<void> {
+    await refreshDueSubscriptions(new D1Storage(env.DB))
+  },
   async fetch(request: Request, env: Env): Promise<Response> {
-    const storage = new D1Storage(env.DB)
+    let storage = stores.get(env.DB)
+    if (!storage) {
+      storage = new D1Storage(env.DB)
+      stores.set(env.DB, storage)
+    }
 
     const config: ServerConfig = {
       port: 0,

@@ -1,8 +1,16 @@
 import net from 'node:net'
 import type { ProxyNode } from '@subforge/core'
+import { resolvePublicAddress } from './nodeNetwork.js'
 
 /** TCP 连接测活：返回握手耗时 ms，失败/超时返回 null。 */
-export function tcpPing(host: string, port: number, timeoutMs = 3000): Promise<number | null> {
+export async function tcpPing(host: string, port: number, timeoutMs = 3000): Promise<number | null> {
+  if (!Number.isInteger(port) || port < 1 || port > 65535) return null
+  let address: string
+  try {
+    address = (await resolvePublicAddress(host, timeoutMs)).address
+  } catch {
+    return null
+  }
   return new Promise((resolve) => {
     const start = performance.now()
     let done = false
@@ -17,7 +25,7 @@ export function tcpPing(host: string, port: number, timeoutMs = 3000): Promise<n
     socket.once('connect', () => finish(Math.round(performance.now() - start)))
     socket.once('timeout', () => finish(null))
     socket.once('error', () => finish(null))
-    socket.connect(port, host)
+    socket.connect(port, address)
   })
 }
 

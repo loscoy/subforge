@@ -27,6 +27,16 @@ const profile: ConversionProfile = {
 }
 
 describe('sing-box renderer', () => {
+  it('不静默删除规则或降级组，拒绝悬空引用；REJECT 规则使用拒绝动作', () => {
+    expect(() => renderSingbox({ nodes: [hk], profile: { ...profile, rules: ['GEOSITE,cn,DIRECT'] } })).toThrow('Unsupported')
+    for (const type of ['fallback', 'load-balance', 'relay'] as const) {
+      expect(() => renderSingbox({ nodes: [hk], profile: { groups: [{ name: 'G', type }], rules: [] } })).toThrow('group type')
+    }
+    expect(() => renderSingbox({ nodes: [hk], profile: { groups: [{ name: 'G', type: 'select', proxies: ['REJECT'] }], rules: [] } })).toThrow('reference')
+    const config = JSON.parse(renderSingbox({ nodes: [hk], profile: { groups: [], rules: ['DOMAIN,ads.example,REJECT', 'MATCH,DIRECT'] } }))
+    expect(config.route.rules).toEqual([{ domain: ['ads.example'], action: 'reject' }])
+    expect(config.route.final).toBe('DIRECT')
+  })
   it('vmess ws+tls outbound', () => {
     const o = nodeToSingbox(hk)
     expect(o.type).toBe('vmess')

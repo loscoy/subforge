@@ -5,7 +5,11 @@ import { describe, expect, it } from 'vitest'
 import { D1Storage } from './d1.js'
 import { InMemoryStorage } from './memory.js'
 import { SqliteStorage } from './sqlite.js'
-import type { Storage } from './types.js'
+import type { ChangeDraft, Profile, Storage } from './types.js'
+import { createApp } from '../routes/app.js'
+import { getConfig } from '../config.js'
+import { QuickJsRunner } from '../sandbox/quickjs.js'
+import { rollbackProfile, saveProfileWithVersion } from '../service.js'
 
 /**
  * 用 better-sqlite3 伪造一个 D1Database，实现 D1Storage 用到的 prepare/bind/all/first/run，
@@ -20,10 +24,15 @@ function makeFakeD1(): any {
     '0004_message_trace.sql',
     '0005_sessions.sql',
     '0006_login_throttles.sql',
+    '0007_share_disabled.sql',
+    '0008_subscription_policy.sql',
   ]) {
     db.exec(readFileSync(fileURLToPath(new URL(`../../migrations/${f}`, import.meta.url)), 'utf-8'))
   }
   return {
+    async batch(statements: { runSync(): unknown }[]) {
+      return db.transaction(() => statements.map((s) => s.runSync()))()
+    },
     prepare(sql: string) {
       const stmt = db.prepare(sql)
       let args: unknown[] = []
@@ -41,6 +50,9 @@ function makeFakeD1(): any {
           return r ?? null
         },
         async run() {
+          return api.runSync()
+        },
+        runSync() {
           const result = stmt.run(...args)
           return { success: true, meta: { changes: result.changes } }
         },
@@ -52,13 +64,139 @@ function makeFakeD1(): any {
 
 function runContract(name: string, make: () => Storage) {
   describe(`Storage 契约: ${name}`, () => {
+    it.each(['save', 'rollback', 'share'])('HTTP %s 的过期写入不能覆盖并发配置或分享变更', async (action) => {
+      const s = make()
+      const original: Profile = { id: 'p', name: 'Original', target: 'mihomo', subscriptionIds: [], profile: { groups: [], rules: [] }, token: 'old-token', createdAt: 1, updatedAt: 1 }
+      await s.upsertProfile(original)
+      await s.addVersion({ id: 'old', entity: 'profile', entityId: 'p', snapshot: JSON.stringify({ ...original, name: 'Rollback' }), createdAt: 1 })
+      let release!: () => void
+      let reached!: () => void
+      const paused = new Promise<void>(resolve => { reached = resolve })
+      const resume = new Promise<void>(resolve => { release = resolve })
+      let first = true
+      const storage = new Proxy(s, {
+        get(target, key) {
+          if (key === 'replaceProfile') return async (...args: Parameters<Storage['replaceProfile']>) => {
+            if (first) { first = false; reached(); await resume }
+            return target.replaceProfile(...args)
+          }
+          const value = Reflect.get(target, key)
+          return typeof value === 'function' ? value.bind(target) : value
+        },
+      })
+      const app = createApp({ storage, runner: new QuickJsRunner(), config: { ...getConfig(), allowNoAuth: true } })
+      const request = (path: string, method: string, body: unknown) => app.request(path, { method, headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) })
+      const pending = action === 'save' ? request('/api/profiles/p', 'PUT', { name: 'Stale save' })
+        : action === 'rollback' ? request('/api/profiles/p/rollback', 'POST', { versionId: 'old' })
+        : request('/api/profiles/p/share', 'POST', { action: 'disable' })
+      await paused
+      if (action === 'share') {
+        expect((await request('/api/profiles/p', 'PUT', { name: 'New config' })).status).toBe(200)
+      } else {
+        expect((await request('/api/profiles/p/share', 'POST', { action: 'rotate' })).status).toBe(200)
+        expect((await request('/api/profiles/p/share', 'POST', { action: 'disable' })).status).toBe(200)
+      }
+      release()
+      expect((await pending).status).toBe(action === 'rollback' ? 400 : 409)
+      const current = (await s.getProfile('p'))!
+      if (action === 'share') {
+        expect(current.name).toBe('New config')
+        expect(current.shareDisabled).toBeFalsy()
+        expect(await s.listVersions('p')).toHaveLength(2)
+      } else {
+        expect(current.name).toBe('Original')
+        expect(current.token).not.toBe('old-token')
+        expect(current.shareDisabled).toBe(true)
+        expect((await app.request('/sub/old-token')).status).toBe(404)
+        expect((await app.request(`/sub/${current.token}`)).status).toBe(404)
+        expect(await s.listVersions('p')).toHaveLength(1)
+      }
+      expect((await request('/api/profiles/p', 'PUT', { name: 'Stale editor', updatedAt: 1 })).status).toBe(409)
+      await s.close()
+    })
+
+    it('回滚与删除来源在写入边界互斥；缺失来源回滚不落版本并说明 ID', async () => {
+      const s = make()
+      await s.upsertSubscription({ id: 'source-a', name: 'A', createdAt: 1, updatedAt: 1 })
+      const original: Profile = { id: 'p', name: 'Original', target: 'mihomo', subscriptionIds: ['source-a'], profile: { groups: [], rules: [] }, token: 'token', createdAt: 1, updatedAt: 1 }
+      await s.upsertProfile(original)
+      let detached = await saveProfileWithVersion(s, original, { ...original, subscriptionIds: [] })
+      const [version] = await s.listVersions('p')
+      // 恢复引用先写入时，紧随其后的删除必须失败。
+      expect(await s.replaceProfile(detached, original)).toBe(true)
+      await expect(s.deleteSubscription('source-a')).rejects.toThrow('referenced')
+      detached = await saveProfileWithVersion(s, original, { ...original, subscriptionIds: [] })
+      const count = (await s.listVersions('p')).length
+      // 删除先写入时，过期的恢复引用写入必须失败。
+      await s.deleteSubscription('source-a')
+      expect(await s.replaceProfile(detached, original, { ...version!, id: 'rejected' })).toBe(false)
+      await expect(rollbackProfile(s, 'p', version!.id)).rejects.toThrow('Missing subscriptions: source-a')
+      expect((await s.getProfile('p'))!.subscriptionIds).toEqual([])
+      expect(await s.listVersions('p')).toHaveLength(count)
+      await s.close()
+    })
+
+    it('缓存写回比较完整旧值，时间戳相同也不能覆盖已编辑来源', async () => {
+      const s = make()
+      const source = { id: 's', name: 'S', url: 'https://example.com/old', content: 'old', createdAt: 1, updatedAt: 1 }
+      await s.upsertSubscription(source)
+      const changed = { ...source, url: 'https://example.com/new', content: undefined }
+      await s.upsertSubscription(changed)
+      expect(await s.replaceSubscription(source, { ...source, content: 'stale result' })).toBe(false)
+      expect((await s.getSubscription('s'))!.url).toBe(changed.url)
+      expect(await s.replaceSubscription(changed, { ...changed, content: 'new result' })).toBe(true)
+      expect((await s.getSubscription('s'))!.content).toBe('new result')
+      await s.close()
+    })
+
+    it('刷新状态原子抢占、过期写入不能覆盖新状态', async () => {
+      const s = make()
+      const first = { source: 'source', lastAttempt: 1, leaseUntil: 60, failures: 0, alerts: [], history: [] }
+      expect(await s.getRefreshState('s')).toBeUndefined()
+      expect(await s.compareRefreshState('s', undefined, first)).toBe(true)
+      expect(await s.compareRefreshState('s', undefined, first)).toBe(false)
+      const next = { ...first, leaseUntil: 0, failures: 1, alerts: ['failed'], history: [{ at: 2, ok: false, error: 'HTTP 500' }] }
+      expect(await s.compareRefreshState('s', first, next)).toBe(true)
+      expect(await s.compareRefreshState('s', first, first)).toBe(false)
+      expect(await s.getRefreshState('s')).toEqual(next)
+      await s.close()
+    })
+
+    it('草稿原子应用、拒绝过期来源、单次消费并保留版本', async () => {
+      const s = make()
+      const source = { id: 's', name: 'S', content: 'trojan://p@example.com:443#A', createdAt: 1, updatedAt: 1 }
+      await s.upsertSubscription(source)
+      const profile: Profile = { id: 'p', name: 'P', target: 'mihomo', subscriptionIds: ['s'], profile: { groups: [], rules: [] }, token: 'token', createdAt: 1, updatedAt: 1 }
+      await s.upsertProfile(profile)
+      const before = (await s.getProfile('p'))!
+      const draft: ChangeDraft = { id: 'd', tool: 'update_profile', entity: 'profiles', entityId: 'p', before, after: { ...before, name: 'Changed', updatedAt: 2 }, createdAt: 2, sources: [(await s.getSubscription('s'))!], validation: { ok: true, warnings: [] }, diff: [] }
+      await s.putDraft(draft)
+      await s.upsertSubscription({ ...source, content: 'trojan://q@example.org:443#B' })
+      const version = { id: 'v', entity: 'profile' as const, entityId: 'p', snapshot: '{}', createdAt: 2 }
+      expect(await s.applyDraftChange(draft, version)).toBe(false)
+      expect(await s.listVersions('p')).toEqual([])
+      expect((await s.getProfile('p'))!.name).toBe('P')
+      await s.upsertSubscription(source)
+      expect(await s.applyDraftChange(draft, version)).toBe(true)
+      expect((await s.getProfile('p'))!.name).toBe('Changed')
+      expect(await s.listVersions('p')).toHaveLength(1)
+      expect(await s.getDraft('d')).toBeUndefined()
+      expect(await s.applyDraftChange(draft, version)).toBe(false)
+      await s.putDraft({ ...draft, id: 'stale', sources: [] })
+      expect(await s.applyDraftChange((await s.getDraft('stale'))!)).toBe(false)
+      expect(await s.listDrafts()).toHaveLength(1)
+      await s.deleteDraft('stale')
+      expect(await s.listDrafts()).toEqual([])
+    })
+
     it('订阅 CRUD', async () => {
       const s = make()
       await s.upsertSubscription({ id: 'a', name: '订阅A', url: 'http://x', createdAt: 1, updatedAt: 1 })
-      await s.upsertSubscription({ id: 'a', name: '订阅A改', createdAt: 1, updatedAt: 2, userInfo: { total: 100, download: 30 } })
+      await s.upsertSubscription({ id: 'a', name: '订阅A改', createdAt: 1, updatedAt: 2, userInfo: { total: 100, download: 30 }, fetchPolicy: { userAgent: 'test-agent', maxAgeMinutes: 30 } })
       const got = await s.getSubscription('a')
       expect(got!.name).toBe('订阅A改')
       expect(got!.userInfo!.total).toBe(100)
+      expect(got!.fetchPolicy).toEqual({ userAgent: 'test-agent', maxAgeMinutes: 30 })
       expect(await s.listSubscriptions()).toHaveLength(1)
       await s.deleteSubscription('a')
       expect(await s.getSubscription('a')).toBeUndefined()
@@ -77,6 +215,9 @@ function runContract(name: string, make: () => Storage) {
       const byToken = await s.getProfileByToken('tok123')
       expect(byToken!.id).toBe('p')
       expect(await s.getProfileByToken('nope')).toBeUndefined()
+      await s.upsertProfile({ ...byId!, token: 'rotated', shareDisabled: true })
+      expect(await s.getProfileByToken('tok123')).toBeUndefined()
+      expect((await s.getProfileByToken('rotated'))!.shareDisabled).toBe(true)
     })
 
     it('版本历史降序', async () => {

@@ -140,14 +140,14 @@ export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
       // 写成 h2-opts 会被整个忽略，Host 头跟着丢失，服务端按 Host 分流时直接断连。
       // 形态也与 h2 不同：path 是数组，headers 的值同样是数组。
       base['http-opts'] = {
-        method: 'GET',
-        ...(t.path ? { path: [t.path] } : {}),
-        ...(t.host ? { headers: { Host: [t.host] } } : {}),
+        method: t.httpMethod || 'GET',
+        ...(t.httpPaths || t.path ? { path: t.httpPaths ?? [t.path!] } : {}),
+        ...(t.httpHeaders || t.host ? { headers: t.httpHeaders ?? { Host: [t.host!] } } : {}),
       }
     } else if (network === 'h2') {
       base['h2-opts'] = {
         ...(t.path ? { path: t.path } : {}),
-        ...(t.host ? { host: [t.host] } : {}),
+        ...(t.httpHosts || t.host ? { host: t.httpHosts ?? [t.host!] } : {}),
       }
     }
   }
@@ -161,13 +161,19 @@ export function nodeToMihomo(n: ProxyNode): Record<string, unknown> {
  *
  * 传入 `warnings` 可收集「正则编译不出来」的降级提示，会经 PipelineOutput 回到预览面板。
  */
-export function resolveGroupMembers(group: ProxyGroupDef, nodeNames: string[], warnings?: string[]): string[] {
+export function resolveGroupMembers(group: ProxyGroupDef, nodeNames: string[], warnings?: string[], nodes?: ProxyNode[]): string[] {
   const members: string[] = []
   if (group.proxies) members.push(...group.proxies)
 
   let pool: string[] = []
   if (group.includeAll) pool = [...nodeNames]
   else if (group.filter) pool = [...nodeNames]
+  else if (group.sourceIds?.length) pool = [...nodeNames]
+  if (group.sourceIds?.length) {
+    if (!nodes) throw new Error('Source grouping requires node metadata')
+    const selected = new Set(nodes.filter((n) => n.meta.source && group.sourceIds!.includes(n.meta.source)).map((n) => n.name))
+    pool = pool.filter((name) => selected.has(name))
+  }
 
   // 坏正则（含 RE2 不支持又有回溯风险的写法）只让**该条筛选**失效，绝不抛出——
   // 否则单个组的正则就能打挂整份配置的渲染与公开分享出口。
@@ -211,7 +217,7 @@ export function renderMihomo(ctx: RenderContext): string {
     const out: Record<string, unknown> = {
       name: g.name,
       type: g.type,
-      proxies: resolveGroupMembers(g, nodeNames, ctx.warnings),
+      proxies: resolveGroupMembers(g, nodeNames, ctx.warnings, nodes),
     }
     if (g.url) out.url = g.url
     if (g.interval) out.interval = g.interval

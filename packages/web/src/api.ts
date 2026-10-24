@@ -58,6 +58,9 @@ export function apiErrorText(e: unknown): string {
 
 export const api = {
   meta: () => req<Meta>('/meta'),
+  listDrafts: () => req<import('./components/Drafts').ChangeDraftView[]>('/drafts'),
+  applyDraft: (id: string) => req(`/drafts/${id}/apply`, { method: 'POST' }),
+  deleteDraft: (id: string) => req(`/drafts/${id}`, { method: 'DELETE' }),
 
   getSettings: () => req<Settings>('/settings'),
   saveSettings: (patch: SettingsPatch) => req<Settings>('/settings', { method: 'PUT', body: JSON.stringify(patch) }),
@@ -78,8 +81,10 @@ export const api = {
   updateProfile: (id: string, b: Partial<Profile>) =>
     req<Profile>(`/profiles/${id}`, { method: 'PUT', body: JSON.stringify(b) }),
   deleteProfile: (id: string) => req(`/profiles/${id}`, { method: 'DELETE' }),
-  preview: (id: string, script: string) =>
-    req<PreviewResult>(`/profiles/${id}/preview`, { method: 'POST', body: JSON.stringify({ script }) }),
+  updateShare: (id: string, action: 'rotate' | 'disable' | 'enable') =>
+    req<Profile>(`/profiles/${id}/share`, { method: 'POST', body: JSON.stringify({ action }) }),
+  preview: (id: string, script: string, draft?: Pick<Profile, 'profile' | 'subscriptionIds' | 'target'>) =>
+    req<PreviewResult>(`/profiles/${id}/preview`, { method: 'POST', body: JSON.stringify({ script, draft }) }),
   output: (id: string) =>
     req<{ ok: boolean; config?: string; error?: string; warnings?: string[] }>(`/profiles/${id}/output`),
   healthcheck: (id: string) =>

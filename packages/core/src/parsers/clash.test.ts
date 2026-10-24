@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import { parseSubscription } from './index.js'
 import { parseClashYaml } from './clash.js'
+import { nodeToMihomo } from '../renderers/mihomo.js'
+import { nodeToSingbox } from '../renderers/singbox.js'
 
 const CLASH_YAML = `
 port: 7890
@@ -97,5 +99,24 @@ describe('parseClashYaml', () => {
     const nodes = parseSubscription('trojan://p@a.com:443#A')
     expect(nodes).toHaveLength(1)
     expect(nodes[0]!.type).toBe('trojan')
+  })
+
+  it('HTTP 多值与 WS headers/Upgrade 保真，并报告无效节点', () => {
+    const httpOpts = { method: 'POST', path: ['/one', '/two'], headers: { Host: ['a.example', 'b.example'], 'X-Test': ['value'] } }
+    const wsOpts = { path: '/ws', headers: { Host: 'cdn.example', 'X-Test': 'kept' } }
+    const diagnostics: string[] = []
+    const parsed = parseClashYaml(JSON.stringify({ proxies: [
+      { name: 'http', type: 'vmess', server: 'example.com', port: 443, uuid: 'u', network: 'http', 'http-opts': httpOpts },
+      { name: 'ws', type: 'vmess', server: 'example.com', port: 443, uuid: 'u', network: 'ws', 'ws-opts': wsOpts },
+      { name: 'upgrade', type: 'vmess', server: 'example.com', port: 443, uuid: 'u', network: 'ws', 'ws-opts': { ...wsOpts, 'v2ray-http-upgrade': true } },
+      null,
+      { type: 'unknown' },
+    ] }), diagnostics)
+    expect(nodeToMihomo(parsed[0]!)['http-opts']).toEqual(httpOpts)
+    expect(nodeToMihomo(parsed[1]!)['ws-opts']).toEqual(wsOpts)
+    expect(nodeToSingbox(parsed[1]!).transport).toMatchObject({ headers: wsOpts.headers })
+    expect(parsed[2]!.transport?.network).toBe('httpupgrade')
+    expect(nodeToMihomo(parsed[2]!)['ws-opts']).toEqual({ ...wsOpts, 'v2ray-http-upgrade': true })
+    expect(diagnostics).toEqual(['Clash proxy 4: invalid node', 'Clash proxy 5: unsupported protocol'])
   })
 })

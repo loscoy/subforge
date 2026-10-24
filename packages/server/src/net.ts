@@ -3,8 +3,7 @@
  * 仅允许 http/https，拒绝 localhost / 私网 / 链路本地（含 169.254.169.254 云元数据）等地址。
  *
  * 说明：这里只对「URL 里的字面主机名/IP」做校验。调用方还必须禁用自动重定向，并对每一跳重新校验。
- * 对「域名解析到内网 IP」的 DNS rebinding 不做处理——边缘运行时（workerd）的 fetch 本就不经过你的
- * 内网；Node 自建若有更高要求，需额外做 DNS 解析后校验与地址固定。
+ * Node 入口另由 nodeNetwork 校验 DNS 结果并固定连接地址；Workers 仍依赖运行时的出网边界。
  */
 
 /** 校验并返回一个可安全抓取的 http(s) URL；不安全则抛错。 */
@@ -47,7 +46,7 @@ export function isPrivateIpv4(host: string): boolean {
     (a === 192 && b === 168) || // 私网
     (a === 169 && b === 254) || // 链路本地（含 169.254.169.254 云元数据）
     (a === 100 && b >= 64 && b <= 127) || // CGNAT 100.64.0.0/10
-    (a === 192 && b === 0 && c === 0) || // IETF 协议分配 / TEST-NET-1
+    (a === 192 && b === 0 && (c === 0 || c === 2)) || // IETF 协议分配 / TEST-NET-1
     (a === 198 && (b === 18 || b === 19)) || // 基准测试网段
     (a === 198 && b === 51 && c === 100) || // TEST-NET-2
     (a === 203 && b === 0 && c === 113) || // TEST-NET-3
@@ -68,6 +67,9 @@ export function isPrivateIpv6(host: string): boolean {
     return isPrivateIpv4(ipv4)
   }
   return (
+    (first! & 0xe000) !== 0x2000 || // 仅允许全球单播，拒绝转换/保留地址空间
+    (parts[0] === 0x2002) || // 6to4 可嵌入私网 IPv4
+    (parts[0] === 0x2001 && parts[1]! < 0x0200) || // 特殊用途（含 Teredo）
     (first! & 0xfe00) === 0xfc00 || // fc00::/7 唯一本地
     (first! & 0xffc0) === 0xfe80 || // fe80::/10 链路本地
     (first! & 0xffc0) === 0xfec0 || // fec0::/10 已废弃站点本地

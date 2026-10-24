@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import type { ConversionProfile } from '@subforge/core'
-import type { AgentMessage, LoginThrottle, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, ChangeDraft, RefreshState, LoginThrottle, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import { draftStatements, profileUpdateStatements, subscriptionUpdateStatement } from './draftSql.js'
 
 /**
  * better-sqlite3 持久化实现。
@@ -19,12 +20,12 @@ export class SqliteStorage implements Storage {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS subscriptions (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, url TEXT, content TEXT,
-        fetchedAt INTEGER, userInfo TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+        fetchedAt INTEGER, userInfo TEXT, fetchPolicy TEXT, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS profiles (
         id TEXT PRIMARY KEY, name TEXT NOT NULL, subscriptionIds TEXT NOT NULL,
         target TEXT NOT NULL, script TEXT, profile TEXT NOT NULL,
-        token TEXT NOT NULL UNIQUE, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
+        token TEXT NOT NULL UNIQUE, shareDisabled INTEGER NOT NULL DEFAULT 0, createdAt INTEGER NOT NULL, updatedAt INTEGER NOT NULL
       );
       CREATE TABLE IF NOT EXISTS versions (
         id TEXT PRIMARY KEY, entity TEXT NOT NULL, entityId TEXT NOT NULL,
@@ -52,8 +53,15 @@ export class SqliteStorage implements Storage {
       );
     `)
     const cols = this.db.prepare('PRAGMA table_info(subscriptions)').all() as { name: string }[]
+    const profileCols = this.db.prepare('PRAGMA table_info(profiles)').all() as { name: string }[]
+    if (!profileCols.some((c) => c.name === 'shareDisabled')) {
+      this.db.exec('ALTER TABLE profiles ADD COLUMN shareDisabled INTEGER NOT NULL DEFAULT 0')
+    }
     if (!cols.some((c) => c.name === 'userInfo')) {
       this.db.exec('ALTER TABLE subscriptions ADD COLUMN userInfo TEXT')
+    }
+    if (!cols.some((c) => c.name === 'fetchPolicy')) {
+      this.db.exec('ALTER TABLE subscriptions ADD COLUMN fetchPolicy TEXT')
     }
     const msgCols = this.db.prepare('PRAGMA table_info(messages)').all() as { name: string }[]
     if (!msgCols.some((c) => c.name === 'tools')) {
@@ -76,9 +84,40 @@ export class SqliteStorage implements Storage {
     }
   }
 
+  async getRefreshState(id: string): Promise<RefreshState | undefined> {
+    const row = this.db.prepare('SELECT v FROM kv WHERE k = ?').get(`refresh:${id}`) as { v: string } | undefined
+    return row ? JSON.parse(row.v) : undefined
+  }
+  async compareRefreshState(id: string, expected: RefreshState | undefined, next: RefreshState): Promise<boolean> {
+    const result = expected
+      ? this.db.prepare('UPDATE kv SET v = ? WHERE k = ? AND v = ?').run(JSON.stringify(next), `refresh:${id}`, JSON.stringify(expected))
+      : this.db.prepare('INSERT OR IGNORE INTO kv (k,v) VALUES (?,?)').run(`refresh:${id}`, JSON.stringify(next))
+    return result.changes === 1
+  }
+
+  async listDrafts(): Promise<ChangeDraft[]> {
+    return (this.db.prepare("SELECT v FROM kv WHERE k LIKE 'draft:%'").all() as { v: string }[]).map((r) => JSON.parse(r.v))
+  }
+  async getDraft(id: string): Promise<ChangeDraft | undefined> {
+    const row = this.db.prepare('SELECT v FROM kv WHERE k = ?').get(`draft:${id}`) as { v: string } | undefined
+    return row ? JSON.parse(row.v) : undefined
+  }
+  async putDraft(draft: ChangeDraft): Promise<void> {
+    this.db.prepare('INSERT INTO kv (k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v').run(`draft:${draft.id}`, JSON.stringify(draft))
+  }
+  async deleteDraft(id: string): Promise<void> {
+    this.db.prepare('DELETE FROM kv WHERE k = ?').run(`draft:${id}`)
+  }
+  async applyDraftChange(draft: ChangeDraft, version?: Version): Promise<boolean> {
+    return this.db.transaction(() => {
+      const results = draftStatements(draft, version).map((s) => this.db.prepare(s.sql).run(...s.values))
+      return results[0]!.changes === 1
+    })()
+  }
+
   // ---- 订阅 ----
   private rowToSub(row: any): Subscription {
-    return { ...row, userInfo: row.userInfo ? JSON.parse(row.userInfo) : undefined }
+    return { ...row, userInfo: row.userInfo ? JSON.parse(row.userInfo) : undefined, fetchPolicy: row.fetchPolicy ? JSON.parse(row.fetchPolicy) : undefined }
   }
   async listSubscriptions(): Promise<Subscription[]> {
     return (this.db.prepare('SELECT * FROM subscriptions ORDER BY createdAt').all() as any[]).map((r) => this.rowToSub(r))
@@ -87,24 +126,30 @@ export class SqliteStorage implements Storage {
     const r = this.db.prepare('SELECT * FROM subscriptions WHERE id = ?').get(id)
     return r ? this.rowToSub(r) : undefined
   }
+  async replaceSubscription(expected: Subscription, next: Subscription): Promise<boolean> {
+    const statement = subscriptionUpdateStatement(expected, next)
+    return this.db.prepare(statement.sql).run(...statement.values).changes === 1
+  }
   async upsertSubscription(s: Subscription): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO subscriptions (id,name,url,content,fetchedAt,userInfo,createdAt,updatedAt)
-         VALUES (@id,@name,@url,@content,@fetchedAt,@userInfo,@createdAt,@updatedAt)
+        `INSERT INTO subscriptions (id,name,url,content,fetchedAt,userInfo,fetchPolicy,createdAt,updatedAt)
+         VALUES (@id,@name,@url,@content,@fetchedAt,@userInfo,@fetchPolicy,@createdAt,@updatedAt)
          ON CONFLICT(id) DO UPDATE SET
-           name=@name,url=@url,content=@content,fetchedAt=@fetchedAt,userInfo=@userInfo,updatedAt=@updatedAt`,
+           name=@name,url=@url,content=@content,fetchedAt=@fetchedAt,userInfo=@userInfo,fetchPolicy=@fetchPolicy,updatedAt=@updatedAt`,
       )
-      .run({ url: null, content: null, fetchedAt: null, ...s, userInfo: s.userInfo ? JSON.stringify(s.userInfo) : null })
+      .run({ url: null, content: null, fetchedAt: null, ...s, userInfo: s.userInfo ? JSON.stringify(s.userInfo) : null, fetchPolicy: s.fetchPolicy ? JSON.stringify(s.fetchPolicy) : null })
   }
   async deleteSubscription(id: string): Promise<void> {
-    this.db.prepare('DELETE FROM subscriptions WHERE id = ?').run(id)
+    const result = this.db.prepare('DELETE FROM subscriptions WHERE id = ? AND NOT EXISTS (SELECT 1 FROM profiles, json_each(profiles.subscriptionIds) WHERE json_each.value = ?)').run(id, id)
+    if (!result.changes && await this.getSubscription(id)) throw new Error(`Subscription is referenced: ${id}`)
   }
 
   // ---- 配置 ----
   private rowToProfile(row: any): Profile {
     return {
       ...row,
+      shareDisabled: !!row.shareDisabled,
       subscriptionIds: JSON.parse(row.subscriptionIds) as string[],
       profile: JSON.parse(row.profile) as ConversionProfile,
     }
@@ -120,17 +165,24 @@ export class SqliteStorage implements Storage {
     const r = this.db.prepare('SELECT * FROM profiles WHERE token = ?').get(token)
     return r ? this.rowToProfile(r) : undefined
   }
+  async replaceProfile(expected: Profile, next: Profile, version?: Version): Promise<boolean> {
+    return this.db.transaction(() => {
+      const results = profileUpdateStatements(expected, next, version).map(s => this.db.prepare(s.sql).run(...s.values))
+      return results[0]!.changes === 1
+    })()
+  }
   async upsertProfile(p: Profile): Promise<void> {
     this.db
       .prepare(
-        `INSERT INTO profiles (id,name,subscriptionIds,target,script,profile,token,createdAt,updatedAt)
-         VALUES (@id,@name,@subscriptionIds,@target,@script,@profile,@token,@createdAt,@updatedAt)
+        `INSERT INTO profiles (id,name,subscriptionIds,target,script,profile,token,shareDisabled,createdAt,updatedAt)
+         VALUES (@id,@name,@subscriptionIds,@target,@script,@profile,@token,@shareDisabled,@createdAt,@updatedAt)
          ON CONFLICT(id) DO UPDATE SET
            name=@name,subscriptionIds=@subscriptionIds,target=@target,script=@script,
-           profile=@profile,token=@token,updatedAt=@updatedAt`,
+           profile=@profile,token=@token,shareDisabled=@shareDisabled,updatedAt=@updatedAt`,
       )
       .run({
         ...p,
+        shareDisabled: p.shareDisabled ? 1 : 0,
         script: p.script ?? null,
         subscriptionIds: JSON.stringify(p.subscriptionIds),
         profile: JSON.stringify(p.profile),

@@ -1,6 +1,7 @@
 import type { ConversionProfile } from '@subforge/core'
 import type { D1Database } from '@cloudflare/workers-types'
-import type { AgentMessage, LoginThrottle, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import type { AgentMessage, ChangeDraft, RefreshState, LoginThrottle, Profile, Session, StoredTemplate, Storage, Subscription, Version } from './types.js'
+import { draftStatements, profileUpdateStatements, subscriptionUpdateStatement } from './draftSql.js'
 
 /**
  * Cloudflare D1 存储实现（异步）。
@@ -9,9 +10,39 @@ import type { AgentMessage, LoginThrottle, Profile, Session, StoredTemplate, Sto
 export class D1Storage implements Storage {
   constructor(private readonly db: D1Database) {}
 
+  async getRefreshState(id: string): Promise<RefreshState | undefined> {
+    const value = await this.db.prepare('SELECT v FROM kv WHERE k = ?').bind(`refresh:${id}`).first<string>('v')
+    return value ? JSON.parse(value) : undefined
+  }
+  async compareRefreshState(id: string, expected: RefreshState | undefined, next: RefreshState): Promise<boolean> {
+    const result = expected
+      ? await this.db.prepare('UPDATE kv SET v = ? WHERE k = ? AND v = ?').bind(JSON.stringify(next), `refresh:${id}`, JSON.stringify(expected)).run()
+      : await this.db.prepare('INSERT OR IGNORE INTO kv (k,v) VALUES (?,?)').bind(`refresh:${id}`, JSON.stringify(next)).run()
+    return result.meta.changes === 1
+  }
+
+  async listDrafts(): Promise<ChangeDraft[]> {
+    const { results } = await this.db.prepare("SELECT v FROM kv WHERE k LIKE 'draft:%'").all<{ v: string }>()
+    return results.map((r) => JSON.parse(r.v))
+  }
+  async getDraft(id: string): Promise<ChangeDraft | undefined> {
+    const value = await this.db.prepare('SELECT v FROM kv WHERE k = ?').bind(`draft:${id}`).first<string>('v')
+    return value ? JSON.parse(value) : undefined
+  }
+  async putDraft(draft: ChangeDraft): Promise<void> {
+    await this.db.prepare('INSERT INTO kv (k,v) VALUES (?,?) ON CONFLICT(k) DO UPDATE SET v=excluded.v').bind(`draft:${draft.id}`, JSON.stringify(draft)).run()
+  }
+  async deleteDraft(id: string): Promise<void> {
+    await this.db.prepare('DELETE FROM kv WHERE k = ?').bind(`draft:${id}`).run()
+  }
+  async applyDraftChange(draft: ChangeDraft, version?: Version): Promise<boolean> {
+    const results = await this.db.batch(draftStatements(draft, version).map((s) => this.db.prepare(s.sql).bind(...s.values)))
+    return results[0]!.meta.changes === 1
+  }
+
   // ---- 订阅 ----
   private rowToSub(row: any): Subscription {
-    return { ...row, userInfo: row.userInfo ? JSON.parse(row.userInfo) : undefined }
+    return { ...row, userInfo: row.userInfo ? JSON.parse(row.userInfo) : undefined, fetchPolicy: row.fetchPolicy ? JSON.parse(row.fetchPolicy) : undefined }
   }
   async listSubscriptions(): Promise<Subscription[]> {
     const { results } = await this.db.prepare('SELECT * FROM subscriptions ORDER BY createdAt').all()
@@ -21,29 +52,35 @@ export class D1Storage implements Storage {
     const r = await this.db.prepare('SELECT * FROM subscriptions WHERE id = ?').bind(id).first()
     return r ? this.rowToSub(r) : undefined
   }
+  async replaceSubscription(expected: Subscription, next: Subscription): Promise<boolean> {
+    const statement = subscriptionUpdateStatement(expected, next)
+    return (await this.db.prepare(statement.sql).bind(...statement.values).run()).meta.changes === 1
+  }
   async upsertSubscription(s: Subscription): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO subscriptions (id,name,url,content,fetchedAt,userInfo,createdAt,updatedAt)
-         VALUES (?,?,?,?,?,?,?,?)
+        `INSERT INTO subscriptions (id,name,url,content,fetchedAt,userInfo,fetchPolicy,createdAt,updatedAt)
+         VALUES (?,?,?,?,?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET
            name=excluded.name,url=excluded.url,content=excluded.content,
-           fetchedAt=excluded.fetchedAt,userInfo=excluded.userInfo,updatedAt=excluded.updatedAt`,
+           fetchedAt=excluded.fetchedAt,userInfo=excluded.userInfo,fetchPolicy=excluded.fetchPolicy,updatedAt=excluded.updatedAt`,
       )
       .bind(
         s.id, s.name, s.url ?? null, s.content ?? null, s.fetchedAt ?? null,
-        s.userInfo ? JSON.stringify(s.userInfo) : null, s.createdAt, s.updatedAt,
+        s.userInfo ? JSON.stringify(s.userInfo) : null, s.fetchPolicy ? JSON.stringify(s.fetchPolicy) : null, s.createdAt, s.updatedAt,
       )
       .run()
   }
   async deleteSubscription(id: string): Promise<void> {
-    await this.db.prepare('DELETE FROM subscriptions WHERE id = ?').bind(id).run()
+    const result = await this.db.prepare('DELETE FROM subscriptions WHERE id = ? AND NOT EXISTS (SELECT 1 FROM profiles, json_each(profiles.subscriptionIds) WHERE json_each.value = ?)').bind(id, id).run()
+    if (!result.meta.changes && await this.getSubscription(id)) throw new Error(`Subscription is referenced: ${id}`)
   }
 
   // ---- 配置 ----
   private rowToProfile(row: any): Profile {
     return {
       ...row,
+      shareDisabled: !!row.shareDisabled,
       subscriptionIds: JSON.parse(row.subscriptionIds) as string[],
       profile: JSON.parse(row.profile) as ConversionProfile,
     }
@@ -60,18 +97,22 @@ export class D1Storage implements Storage {
     const r = await this.db.prepare('SELECT * FROM profiles WHERE token = ?').bind(token).first()
     return r ? this.rowToProfile(r) : undefined
   }
+  async replaceProfile(expected: Profile, next: Profile, version?: Version): Promise<boolean> {
+    const results = await this.db.batch(profileUpdateStatements(expected, next, version).map(s => this.db.prepare(s.sql).bind(...s.values)))
+    return results[0]!.meta.changes === 1
+  }
   async upsertProfile(p: Profile): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO profiles (id,name,subscriptionIds,target,script,profile,token,createdAt,updatedAt)
-         VALUES (?,?,?,?,?,?,?,?,?)
+        `INSERT INTO profiles (id,name,subscriptionIds,target,script,profile,token,shareDisabled,createdAt,updatedAt)
+         VALUES (?,?,?,?,?,?,?,?,?,?)
          ON CONFLICT(id) DO UPDATE SET
            name=excluded.name,subscriptionIds=excluded.subscriptionIds,target=excluded.target,
-           script=excluded.script,profile=excluded.profile,token=excluded.token,updatedAt=excluded.updatedAt`,
+           script=excluded.script,profile=excluded.profile,token=excluded.token,shareDisabled=excluded.shareDisabled,updatedAt=excluded.updatedAt`,
       )
       .bind(
         p.id, p.name, JSON.stringify(p.subscriptionIds), p.target, p.script ?? null,
-        JSON.stringify(p.profile), p.token, p.createdAt, p.updatedAt,
+        JSON.stringify(p.profile), p.token, p.shareDisabled ? 1 : 0, p.createdAt, p.updatedAt,
       )
       .run()
   }

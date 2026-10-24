@@ -14,6 +14,8 @@ export interface ProxyGroupDef {
   type: GroupType
   proxies?: string[]
   includeAll?: boolean
+  /** 限定动态纳入的节点来源；显式 proxies 不受影响 */
+  sourceIds?: string[]
   /** 正则字符串，匹配节点 name */
   filter?: string
   /** 反向正则：命中则排除 */
@@ -36,6 +38,8 @@ export type NodeOp =
   | { op: 'dedupe' }
   | { op: 'tagRegions' }
   | { op: 'sortByName' }
+  | { op: 'keepSource'; sourceIds: string[] }
+  | { op: 'prefixSource'; sourceId: string; prefix: string }
   /** 保留 name 匹配正则的节点 */
   | { op: 'keep'; pattern: string }
   /** 剔除 name 匹配正则的节点 */

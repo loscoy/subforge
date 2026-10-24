@@ -12,6 +12,11 @@ export interface Subscription {
   content?: string
   fetchedAt?: number
   userInfo?: UserInfo
+  fetchPolicy?: { userAgent?: string; maxAgeMinutes?: number; autoRefresh?: boolean; intervalMinutes?: number; failureThreshold?: number; dropPercent?: number }
+  refreshStatus?: {
+    failures: number; alerts: string[]
+    history: { at: number; ok: boolean; error?: string; delta?: { before: number; after: number; added: { name: string }[]; removed: { name: string }[] } }[]
+  }
   createdAt: number
   updatedAt: number
 }
@@ -21,6 +26,7 @@ export interface ProxyGroupDef {
   type: 'select' | 'url-test' | 'fallback' | 'load-balance' | 'relay'
   proxies?: string[]
   includeAll?: boolean
+  sourceIds?: string[]
   filter?: string
   excludeFilter?: string
   url?: string
@@ -32,6 +38,8 @@ export type NodeOp =
   | { op: 'dedupe' }
   | { op: 'tagRegions' }
   | { op: 'sortByName' }
+  | { op: 'keepSource'; sourceIds: string[] }
+  | { op: 'prefixSource'; sourceId: string; prefix: string }
   | { op: 'keep'; pattern: string }
   | { op: 'drop'; pattern: string }
   | { op: 'rename'; from: string; to: string }
@@ -52,6 +60,7 @@ export interface Profile {
   script?: string
   profile: ConversionProfile
   token: string
+  shareDisabled?: boolean
   createdAt: number
   updatedAt: number
 }
@@ -61,6 +70,9 @@ export interface PreviewResult {
   before: { name: string }[]
   after: { name: string }[]
   logs: string[]
+  warnings?: string[]
+  config?: string
+  stages?: import('@subforge/core').PipelineStage[]
   error?: string
 }
 

@@ -11,6 +11,8 @@ import { checkNodes } from './health.js'
 import { createApp } from './routes/app.js'
 import { QuickJsRunner } from './sandbox/quickjs.js'
 import { SqliteStorage } from './storage/index.js'
+import { publicSubscriptionFetch } from './nodeNetwork.js'
+import { refreshDueSubscriptions, setSubscriptionFetcher } from './service.js'
 
 function main() {
   const config = getConfig()
@@ -20,7 +22,15 @@ function main() {
   if (dir && !existsSync(dir)) mkdirSync(dir, { recursive: true })
 
   const storage = new SqliteStorage(config.dbPath)
+  setSubscriptionFetcher(storage, publicSubscriptionFetch)
   const runner = new QuickJsRunner()
+  let refreshing = false
+  setInterval(async () => {
+    if (refreshing) return
+    refreshing = true
+    try { await refreshDueSubscriptions(storage) } catch { console.error('Scheduled refresh failed') }
+    finally { refreshing = false }
+  }, 60_000).unref()
 
   const app = createApp({
     storage,

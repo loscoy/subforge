@@ -9,7 +9,7 @@ import { dedupe, emojiOf, regionOf, tagRegions } from './script/utils.js'
  * 正则类操作（keep / drop / rename）若正则编译不出来，只跳过该条操作，
  * 不中断整个流水线——坏正则不该让整份配置无法构建。
  */
-export function applyOperations(nodes: ProxyNode[], ops: NodeOp[]): ProxyNode[] {
+export function applyOperations(nodes: ProxyNode[], ops: NodeOp[], warnings?: string[]): ProxyNode[] {
   let ns = nodes
   for (const op of ops) {
     switch (op.op) {
@@ -22,19 +22,28 @@ export function applyOperations(nodes: ProxyNode[], ops: NodeOp[]): ProxyNode[] 
       case 'sortByName':
         ns = [...ns].sort((a, b) => a.name.localeCompare(b.name))
         break
+      case 'keepSource':
+        ns = ns.filter((n) => !!n.meta.source && op.sourceIds.includes(n.meta.source))
+        break
+      case 'prefixSource':
+        ns = ns.map((n) => n.meta.source === op.sourceId ? { ...n, name: op.prefix + n.name } : n)
+        break
       case 'keep': {
         const re = op.pattern ? tryCompileLinearRegex(op.pattern) : undefined
         if (re) ns = ns.filter((n) => re.test(n.name))
+        else if (op.pattern) warnings?.push(`已跳过无法安全编译的 keep 正则：${op.pattern}`)
         break
       }
       case 'drop': {
         const re = op.pattern ? tryCompileLinearRegex(op.pattern) : undefined
         if (re) ns = ns.filter((n) => !re.test(n.name))
+        else if (op.pattern) warnings?.push(`已跳过无法安全编译的 drop 正则：${op.pattern}`)
         break
       }
       case 'rename': {
         const re = op.from ? tryCompileLinearRegex(op.from) : undefined
         if (re) ns = ns.map((n) => ({ ...n, name: re.replaceAll(n.name, op.to) }))
+        else if (op.from) warnings?.push(`已跳过无法安全编译的 rename 正则：${op.from}`)
         break
       }
     }
@@ -49,6 +58,7 @@ const REGION_ORDER = ['HK', 'TW', 'JP', 'SG', 'US', 'KR', 'UK', 'DE', 'RU', 'IN'
 function expandOne(g: ProxyGroupDef, nodes: ProxyNode[]): ProxyGroupDef[] {
   const present = new Set<string>()
   for (const n of nodes) {
+    if (g.sourceIds?.length && !g.sourceIds.includes(n.meta.source ?? '')) continue
     const r = n.meta.region ?? regionOf(n.name)
     if (r) present.add(r)
   }
@@ -63,6 +73,7 @@ function expandOne(g: ProxyGroupDef, nodes: ProxyNode[]): ProxyGroupDef[] {
       name: `${emoji ? emoji + ' ' : ''}${region}`,
       type: g.type === 'select' ? ('url-test' as const) : g.type,
       includeAll: true,
+      sourceIds: g.sourceIds,
       filter: regionFilter(region),
       url: g.url,
       interval: g.interval,

@@ -59,7 +59,7 @@ npm test               # 运行全部测试
 ### Cloudflare Workers（serverless）
 
 D1 存储 + QuickJS-wasm 沙箱 + assets 托管前端。见 [`docs/DEPLOY_CLOUDFLARE.md`](docs/DEPLOY_CLOUDFLARE.md)。
-边缘部署不支持节点测活（无原始 TCP）；所有部署的脚本都仅支持同步执行。
+边缘部署不支持节点测活（无原始 TCP）；脚本能力与 Node 一致，详见下方沙箱说明。
 
 ## 环境变量
 
@@ -147,7 +147,9 @@ stdio 模式直接访问同一个 sqlite 文件，不需要 MCP 口令：
 }
 ```
 
-## 转换脚本（两种模式，自动识别）
+## 转换脚本（自动识别入口）
+
+订阅编辑、通用导出、Agent 草稿审批、诊断、定时刷新与有限 `operator/filter` 兼容见 [订阅、草稿与诊断](docs/SAFE_CHANGES.md)。
 
 **1. transform（节点变换）** — 只处理节点列表，分组/规则在转换档配置里设：
 
@@ -169,7 +171,7 @@ function main(config) {
 }
 ```
 
-> Node 与 Workers 都由 QuickJS 隔离执行，transform / override 均仅支持同步脚本；`$arguments` 对应转换档参数。配置里的动态正则使用线性时间的 RE2 语法。像 [powerfullz/override-rules](https://github.com/powerfullz/override-rules) 这类同步脚本可直接使用。
+> Node 与 Workers 都由 QuickJS 隔离执行，支持同步脚本及可由微任务完成的 async 脚本，不提供网络、定时器或文件系统。覆写脚本仅允许 Mihomo/Clash 目标；`$arguments` 对应转换档参数。配置里的动态正则使用线性时间的 RE2 语法。
 
 ## License
 

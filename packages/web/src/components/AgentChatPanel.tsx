@@ -19,16 +19,6 @@ interface ChatItem {
   steps?: AgentStep[]
 }
 
-const MUTATING = new Set([
-  'write_config',
-  'write_script',
-  'apply_template',
-  'rollback_profile',
-  'save_template',
-  'delete_template',
-  'update_working_memory',
-])
-
 /** 工具 → 思考球状态与文案。未列出的按名字前缀兜底（见 liveStatus）。 */
 const TOOL_STATUS: Record<string, { state: OrbState; label: string }> = {
   web_search: { state: 'searching', label: '联网检索…' },
@@ -251,14 +241,14 @@ function LiveStatus({ live, scheme, reduced }: { live: LiveTurn; scheme: 'light'
   )
 }
 
-/** 紧凑的 Agent 对话面板：流式输出 + 思考/工具可展开 + Markdown。对话产生写操作后回调 onChanged。 */
+/** 紧凑的 Agent 对话面板：产生草稿只通知草稿列表，不通知配置编辑器。 */
 export function AgentChatPanel({
   sessionId,
   ensureSession,
   onActivity,
   context,
   hasAgent,
-  onChanged,
+  onDraftsChanged,
   height,
   placeholder,
 }: {
@@ -270,7 +260,7 @@ export function AgentChatPanel({
   onActivity?: (id: string) => void
   context?: string
   hasAgent: boolean
-  onChanged?: () => void
+  onDraftsChanged?: () => void
   height?: number
   placeholder?: string
 }) {
@@ -390,7 +380,10 @@ export function AgentChatPanel({
           steps,
         },
       ])
-      if (steps.some((s) => MUTATING.has(s.tool))) onChanged?.()
+      if (steps.some((s) => {
+        const result = s.result as { applied?: boolean; draftId?: string } | null | undefined
+        return !s.error && result?.applied === false && typeof result.draftId === 'string'
+      })) onDraftsChanged?.()
     }
     try {
       await api.agentStream(

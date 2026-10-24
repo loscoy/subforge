@@ -19,6 +19,8 @@ export { nodeToSingbox, clashRuleToSingbox } from './renderers/singbox.js'
 export { nodeToSurge } from './renderers/surge.js'
 export { runPipeline } from './pipeline.js'
 export type { PipelineInput, PipelineOutput } from './pipeline.js'
+export { diffNodes, diffConfigSections, explainDomainRoute } from './diagnostics.js'
+export type { PipelineStage, NodeDelta } from './diagnostics.js'
 
 // 脚本 API
 export {

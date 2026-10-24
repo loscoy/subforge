@@ -35,6 +35,10 @@ import { buildTools } from '../tools/registry.js'
 import {
   buildProfileOutput,
   collectRawSubscriptions,
+  deleteSubscription,
+  updateSubscription,
+  getSubscriptionRefreshStatus,
+  subscriptionFetchPolicySchema,
   ensureSubscriptionContent,
   newDefaultProfile,
   previewScript,
@@ -42,6 +46,7 @@ import {
   saveProfileWithVersion,
 } from '../service.js'
 import { newId, newToken, now } from '../util.js'
+import { applyDraft } from '../drafts.js'
 
 export interface AppDeps {
   storage: Storage
@@ -87,11 +92,11 @@ export function createApp(deps: AppDeps): Hono {
   app.get('/sub/:token', async (c) => {
     const token = c.req.param('token')
     const profile = await storage.getProfileByToken(token)
-    if (!profile) return c.text('订阅不存在', 404)
+    if (!profile || profile.shareDisabled) return c.text('订阅不存在', 404)
     const target = c.req.query('target') || profile.target
-    const force = c.req.query('force') === '1'
+    if (c.req.query('force') === '1') return c.text('Force refresh requires authentication', 403)
     try {
-      const out = await buildProfileOutput(storage, runner, { ...profile, target }, { force })
+      const out = await buildProfileOutput(storage, runner, { ...profile, target })
       const renderer = getRenderer(target)
       c.header('Content-Type', renderer?.contentType ?? 'text/plain; charset=utf-8')
       c.header('Content-Disposition', `attachment; filename="${encodeURIComponent(profile.name)}.yaml"`)
@@ -301,8 +306,23 @@ export function createApp(deps: AppDeps): Hono {
     return c.json(await probeAgentModel(model))
   })
 
+  // 草稿应用只经登录用户的 HTTP 操作，不注册为 Agent/MCP 工具。
+  api.get('/drafts', async (c) => c.json(await storage.listDrafts()))
+  api.delete('/drafts/:id', async (c) => {
+    await storage.deleteDraft(c.req.param('id'))
+    return c.json({ ok: true })
+  })
+  api.post('/drafts/:id/apply', async (c) => {
+    try {
+      await applyDraft(storage, c.req.param('id'))
+      return c.json({ ok: true })
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409)
+    }
+  })
+
   // 订阅
-  api.get('/subscriptions', async (c) => c.json(await storage.listSubscriptions()))
+  api.get('/subscriptions', async (c) => c.json(await Promise.all((await storage.listSubscriptions()).map(async (sub) => ({ ...sub, refreshStatus: await getSubscriptionRefreshStatus(storage, sub) })))))
   api.post('/subscriptions', async (c) => {
     const body = await c.req.json<Partial<Subscription>>()
     const sub: Subscription = {
@@ -310,6 +330,7 @@ export function createApp(deps: AppDeps): Hono {
       name: body.name || '未命名订阅',
       url: body.url,
       content: body.content,
+      fetchPolicy: subscriptionFetchPolicySchema.parse(body.fetchPolicy),
       createdAt: now(),
       updatedAt: now(),
     }
@@ -320,12 +341,15 @@ export function createApp(deps: AppDeps): Hono {
     const cur = await storage.getSubscription(c.req.param('id'))
     if (!cur) return c.json({ error: '不存在' }, 404)
     const body = await c.req.json<Partial<Subscription>>()
-    const next: Subscription = { ...cur, ...body, id: cur.id, updatedAt: now() }
-    await storage.upsertSubscription(next)
+    const next = await updateSubscription(storage, cur, body)
     return c.json(next)
   })
   api.delete('/subscriptions/:id', async (c) => {
-    await storage.deleteSubscription(c.req.param('id'))
+    try {
+      await deleteSubscription(storage, c.req.param('id'))
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409)
+    }
     return c.json({ ok: true })
   })
   api.post('/subscriptions/:id/refresh', async (c) => {
@@ -365,21 +389,35 @@ export function createApp(deps: AppDeps): Hono {
     const cur = await storage.getProfile(c.req.param('id'))
     if (!cur) return c.json({ error: '不存在' }, 404)
     const body = await c.req.json<Partial<Profile>>()
-    const next: Profile = { ...cur, ...body, id: cur.id, token: cur.token }
-    await saveProfileWithVersion(storage, next, '手动保存')
-    return c.json(await storage.getProfile(cur.id))
+    const next: Profile = { ...cur, ...body, id: cur.id, token: cur.token, shareDisabled: cur.shareDisabled }
+    if (body.updatedAt !== undefined && body.updatedAt !== cur.updatedAt) return c.json({ error: 'Profile changed; reload before saving' }, 409)
+    try {
+      return c.json(await saveProfileWithVersion(storage, cur, next, '手动保存'))
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409)
+    }
   })
   api.delete('/profiles/:id', async (c) => {
     await storage.deleteProfile(c.req.param('id'))
     return c.json({ ok: true })
+  })
+  api.post('/profiles/:id/share', async (c) => {
+    const p = await storage.getProfile(c.req.param('id'))
+    if (!p) return c.json({ error: '不存在' }, 404)
+    const { action } = await c.req.json<{ action: string }>()
+    if (!['rotate', 'disable', 'enable'].includes(action)) return c.json({ error: 'Invalid share action' }, 400)
+    const next = { ...p, token: action === 'rotate' || action === 'enable' ? newToken() : p.token, shareDisabled: action === 'disable', updatedAt: Math.max(now(), p.updatedAt + 1) }
+    if (!await storage.replaceProfile(p, next)) return c.json({ error: 'Profile or source references changed; reload before changing sharing' }, 409)
+    return c.json(next)
   })
 
   // 预览 / 输出 / 版本
   api.post('/profiles/:id/preview', async (c) => {
     const p = await storage.getProfile(c.req.param('id'))
     if (!p) return c.json({ error: '不存在' }, 404)
-    const { script } = await c.req.json<{ script: string }>()
-    const r = await previewScript(storage, runner, p, script ?? p.script ?? '')
+    const { script, draft } = await c.req.json<{ script?: string; draft?: Pick<Profile, 'profile' | 'subscriptionIds' | 'target'> }>()
+    const candidate = draft ? { ...p, profile: draft.profile, subscriptionIds: draft.subscriptionIds, target: draft.target } : p
+    const r = await previewScript(storage, runner, candidate, script ?? p.script ?? '')
     return c.json(r)
   })
   api.get('/profiles/:id/output', async (c) => {
@@ -443,8 +481,11 @@ export function createApp(deps: AppDeps): Hono {
     const { profileId } = await c.req.json<{ profileId: string }>()
     const p = await storage.getProfile(profileId)
     if (!p) return c.json({ error: '配置不存在' }, 404)
-    await saveProfileWithVersion(storage, { ...p, profile: t.profile, script: t.script }, `套用模板「${t.name}」`)
-    return c.json(await storage.getProfile(profileId))
+    try {
+      return c.json(await saveProfileWithVersion(storage, p, { ...p, profile: t.profile, script: t.script }, `套用模板「${t.name}」`))
+    } catch (error) {
+      return c.json({ error: error instanceof Error ? error.message : String(error) }, 409)
+    }
   })
 
   // Agent 会话（threadId = session.id）
