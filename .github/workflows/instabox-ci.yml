@@ -1,7 +1,9 @@
 name: InstaBox CI trial
 
-# 仅手动运行，不接收 fork PR，不读取部署密钥。
+# 临时试验只响应本分支推送，不接收 fork PR，不读取部署密钥。
 on:
+  push:
+    branches: [ci/instabox-trial]
   workflow_dispatch:
 
 permissions:
