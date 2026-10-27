@@ -29,3 +29,7 @@
 - 06:22:30 UTC 显式调用 InstaBox resume API；06:22:33 UTC 恢复成功，`processesPreserved: true`。未重新启动或注册 runner，原 Runner.Listener 进程仍存在。
 - 此次排队观察窗口约 29 秒；只能证明本次窗口内没有自动唤醒，不能据此判断任何可能的长延迟行为。现有配置没有 GitHub 到 InstaBox 的唤醒集成。
 - main 未修改，Cloudflare 发布未触发；本 PR 仅用于试验，不需要合并。
+- 机器恢复后约 1 分半任务仍排队，原 runner 日志出现 `Connection reset by peer`，不能认为保留进程就等于连接健康。
+- 显式终止并重新启动 Runner.Listener（未重新注册）后，06:24:12 UTC 上线，06:24:13 UTC 接到同一个排队任务，06:24:34 UTC 成功完成。类型检查通过，39 个文件、392 个测试通过。
+- 临时 runner 完成后自动注销，GitHub runner 数量恢复为 0；机器再次暂停保留环境。
+- 实际可用方案需要外部唤醒，并检查 runner 是否在线；恢复连接异常时重启 runner。本次没有等待其全部内置重试结束，因此不能断言所有暂停恢复都必须重启。
