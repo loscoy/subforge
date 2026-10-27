@@ -21,3 +21,11 @@
 - `npm test`：39 个测试文件、392 个测试全部通过，Vitest 耗时 3.56 秒。
 
 这是云机器执行能力验证，不是 GitHub Actions 完整调度验收。手动工作流尚未合并，暂停后恢复及自动闲置判定尚未验收。
+
+## 暂停调度试验（不合并 main）
+
+- 临时为 `ci/instabox-trial` 分支启用 push 触发，提交 `ad76bec9f38b84a5eb8d5feccb8f31ea388c80ca` 产生 [Actions run 40460667979](https://github.com/loscoy/subforge/actions/runs/40460667979)，随后移除 push 触发。
+- 06:22:01 UTC 创建任务；查询时任务处于 queued、无 runner，机器仍 suspended，revision 仍为 2，没有恢复操作。
+- 06:22:30 UTC 显式调用 InstaBox resume API；06:22:33 UTC 恢复成功，`processesPreserved: true`。未重新启动或注册 runner，原 Runner.Listener 进程仍存在。
+- 此次排队观察窗口约 29 秒；只能证明本次窗口内没有自动唤醒，不能据此判断任何可能的长延迟行为。现有配置没有 GitHub 到 InstaBox 的唤醒集成。
+- main 未修改，Cloudflare 发布未触发；本 PR 仅用于试验，不需要合并。
